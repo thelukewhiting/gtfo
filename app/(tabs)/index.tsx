@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAction, useQuery } from "convex/react";
+import * as Location from "expo-location";
 import { api } from "../../convex/_generated/api";
 import { useLocation } from "../../hooks/useLocation";
 import { usePushToken } from "../../hooks/usePushToken";
@@ -27,12 +28,21 @@ export default function HomeScreen() {
   const [sunsetData, setSunsetData] = useState<SunsetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [placeName, setPlaceName] = useState<string | null>(null);
 
   const getSunsetQuality = useAction(api.sunsets.getSunsetQuality);
   const device = useQuery(
     api.devices.getByToken,
     pushToken ? { pushToken } : "skip"
   );
+
+  const getLocalDateString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   const fetchSunset = async () => {
     if (!location) return;
@@ -53,10 +63,30 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
+    console.log("Location changed:", location?.coords);
     if (location) {
       fetchSunset();
+      fetchPlaceName();
     }
   }, [location]);
+
+  const fetchPlaceName = async () => {
+    if (!location) return;
+    try {
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+      console.log("Reverse geocode result:", place);
+      if (place) {
+        const name = place.city || place.subregion || place.region || place.country;
+        console.log("Setting place name:", name);
+        setPlaceName(name || null);
+      }
+    } catch (error) {
+      console.log("Failed to get place name:", error);
+    }
+  };
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -70,14 +100,6 @@ export default function HomeScreen() {
       minute: "2-digit",
       hour12: true,
     });
-  };
-
-  const getLocalDateString = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
   };
 
   if (errorMsg) {
@@ -144,10 +166,8 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {location && (
-          <Text style={styles.location}>
-            {location.coords.latitude.toFixed(2)}, {location.coords.longitude.toFixed(2)}
-          </Text>
+        {placeName && (
+          <Text style={styles.location}>{placeName}</Text>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -227,8 +247,8 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   location: {
-    fontSize: 12,
-    color: "#555",
+    fontSize: 14,
+    color: "#888",
     marginTop: 30,
   },
   errorText: {

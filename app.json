@@ -8,14 +8,12 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "scheme": "gtfo",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#1a1a2e"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.gtfo.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "GTFO needs your location to check sunset predictions for your area.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "GTFO needs background location access to keep sunset predictions accurate when you travel.",
@@ -43,6 +41,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1a1a2e",
+          "image": "./assets/splash-empty.png",
+          "imageWidth": 1
+        }
+      ],
       [
         "expo-location",
         {
