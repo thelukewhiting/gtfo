@@ -24,7 +24,7 @@ interface SunsetData {
 
 export default function HomeScreen() {
   const { location, errorMsg } = useLocation();
-  const { pushToken } = usePushToken();
+  usePushToken(); // Initialize push notifications
   const [sunsetData, setSunsetData] = useState<SunsetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,10 +32,6 @@ export default function HomeScreen() {
   const [lastGeocodedCoords, setLastGeocodedCoords] = useState<{lat: number, lng: number} | null>(null);
 
   const getSunsetQuality = useAction(api.sunsets.getSunsetQuality);
-  const device = useQuery(
-    api.devices.getByToken,
-    pushToken ? { pushToken } : "skip"
-  );
 
   const getLocalDateString = () => {
     const now = new Date();
