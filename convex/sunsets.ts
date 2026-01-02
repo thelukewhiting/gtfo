@@ -2,15 +2,50 @@ import { action, internalAction, internalMutation, internalQuery } from "./_gene
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
-const SUNSETWX_API_URL = "https://sunburst.sunsetwx.com/v1/quality";
-const DEMO_MODE = !process.env.SUNSETWX_API_KEY;
+const SUNSETHUE_API_URL = "https://api.sunsethue.com";
+const DEMO_MODE = !process.env.SUNSETHUE_API_KEY;
 
 interface SunsetQuality {
-  quality: "Poor" | "Fair" | "Good" | "Great";
+  quality: "Poor" | "Fair" | "Good" | "Great" | "Excellent";
   qualityPercent: number;
   sunsetTime: string;
   validAt: string;
   isDemo?: boolean;
+}
+
+function normalizeQualityText(value: string | undefined): SunsetQuality["quality"] | null {
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  switch (normalized) {
+    case "poor":
+      return "Poor";
+    case "fair":
+      return "Fair";
+    case "good":
+      return "Good";
+    case "great":
+      return "Great";
+    case "excellent":
+      return "Excellent";
+    default:
+      return null;
+  }
+}
+
+function formatDateForTimezone(date: Date, timeZone: string | undefined): string {
+  try {
+    if (!timeZone) throw new Error("Missing timezone");
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const mapped = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${mapped.year}-${mapped.month}-${mapped.day}`;
+  } catch {
+    return date.toISOString().split("T")[0];
+  }
 }
 
 function generateMockSunset(latitude: number): SunsetQuality {
@@ -69,37 +104,59 @@ function generateMockSunset(latitude: number): SunsetQuality {
 async function fetchSunsetQuality(
   latitude: number,
   longitude: number,
-  apiKey: string
+  apiKey: string,
+  dateStr: string
 ): Promise<SunsetQuality | null> {
   try {
     const response = await fetch(
-      `${SUNSETWX_API_URL}?geo=${latitude},${longitude}&type=sunset`,
+      `${SUNSETHUE_API_URL}/event?latitude=${latitude}&longitude=${longitude}&date=${dateStr}&type=sunset`,
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          "x-api-key": apiKey,
         },
       }
     );
 
     if (!response.ok) {
-      console.error("SunsetWX API error:", response.status);
+      console.error("Sunsethue API error:", response.status);
       return null;
     }
 
-    const data = await response.json();
+    const result = await response.json();
 
-    if (!data.features || data.features.length === 0) {
+    // Handle error responses
+    if (typeof result.status === "number" && (result.status === 400 || result.status === 500)) {
+      console.error("Sunsethue API returned error:", result.code, result.message);
       return null;
     }
 
-    const feature = data.features[0];
-    const props = feature.properties;
+    const data = result.data;
+
+    // Check if model data is available
+    if (!data || !data.model_data) {
+      console.log("No model data available for this location/date");
+      return null;
+    }
+
+    if (typeof data.quality !== "number") {
+      console.error("Sunsethue API missing quality data");
+      return null;
+    }
+
+    const qualityText = normalizeQualityText(data.quality_text);
+    if (!qualityText) {
+      console.error("Sunsethue API returned unknown quality_text:", data.quality_text);
+      return null;
+    }
+
+    // quality is 0-1, convert to percent
+    const qualityPercent = Math.round(data.quality * 100);
 
     return {
-      quality: props.quality,
-      qualityPercent: props.quality_percent,
-      sunsetTime: props.valid_at,
-      validAt: props.valid_at,
+      quality: qualityText,
+      qualityPercent,
+      sunsetTime: data.time,
+      validAt: data.time,
     };
   } catch (error) {
     console.error("Failed to fetch sunset quality:", error);
@@ -111,17 +168,17 @@ export const getSunsetQuality = action({
   args: {
     latitude: v.number(),
     longitude: v.number(),
+    date: v.string(),
   },
   handler: async (ctx, args): Promise<SunsetQuality | null> => {
-    const apiKey = process.env.SUNSETWX_API_KEY;
+    const apiKey = process.env.SUNSETHUE_API_KEY;
 
-    // Demo mode: return mock data when no API key
     if (!apiKey) {
-      console.log("SUNSETWX_API_KEY not configured - using demo mode");
+      console.log("SUNSETHUE_API_KEY not configured - using demo mode");
       return generateMockSunset(args.latitude);
     }
 
-    return await fetchSunsetQuality(args.latitude, args.longitude, apiKey);
+    return await fetchSunsetQuality(args.latitude, args.longitude, apiKey, args.date);
   },
 });
 
@@ -190,16 +247,18 @@ export const deleteReminder = internalMutation({
   },
 });
 
+// Sunsethue quality ranges: Poor 0-20%, Fair 21-40%, Good 41-60%, Great 61-80%, Excellent 81-100%
 const QUALITY_THRESHOLD: Record<string, number> = {
-  Fair: 17.63,
-  Good: 50,
-  Great: 75,
+  Fair: 21,
+  Good: 41,
+  Great: 61,
+  Excellent: 81,
 };
 
 export const checkMorningSunsets = internalAction({
   args: {},
   handler: async (ctx) => {
-    const apiKey = process.env.SUNSETWX_API_KEY;
+    const apiKey = process.env.SUNSETHUE_API_KEY;
     const isDemoMode = !apiKey;
 
     if (isDemoMode) {
@@ -211,9 +270,10 @@ export const checkMorningSunsets = internalAction({
     for (const device of devices) {
       if (!device.notifyMorning) continue;
 
+      const dateStr = formatDateForTimezone(new Date(), device.timezone);
       const quality = isDemoMode
         ? generateMockSunset(device.latitude)
-        : await fetchSunsetQuality(device.latitude, device.longitude, apiKey!);
+        : await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
 
       if (!quality) continue;
 

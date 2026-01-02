@@ -29,13 +29,13 @@ Create a `.env.local` file:
 EXPO_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 ```
 
-In the Convex dashboard, add the SunsetWX API key:
+In the Convex dashboard, add the Sunsethue API key:
 - Go to Settings > Environment Variables
-- Add `SUNSETWX_API_KEY` with your API key
+- Add `SUNSETHUE_API_KEY` with your API key
 
-### 4. Get SunsetWX API access
+### 4. Get Sunsethue API access
 
-Email team@sunsetwx.com to request access to the Sunburst API.
+Sign up at https://sunsethue.com/dev-api to get your API key (free tier: 1,000 credits/day).
 
 ### 5. Run the app
 
@@ -51,8 +51,8 @@ npm start
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   iOS App       │────▶│   Convex        │────▶│  SunsetWX API   │
-│   (Expo)        │     │   Backend       │     │  (Sunburst)     │
+│   iOS App       │────▶│   Convex        │────▶│  Sunsethue API  │
+│   (Expo)        │     │   Backend       │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
         │                       │
         │                       ▼
@@ -61,8 +61,8 @@ npm start
 
 ## Features
 
-- **Sunset quality predictions** - Based on cloud cover, humidity, and atmospheric conditions
-- **Morning notifications (11am)** - After SunsetWX predictions update at 10am
+- **Sunset quality predictions** - Based on cloud cover and atmospheric conditions
+- **Morning notifications (11am)** - After Sunsethue predictions update
 - **1 hour reminders** - Configurable alert before sunset starts
 - **Quality threshold** - Only get notified for Good or Great sunsets
 - **Background location** - Predictions update as you travel
@@ -71,5 +71,5 @@ npm start
 
 - React Native (Expo)
 - Convex (backend)
-- SunsetWX Sunburst API (sunset predictions)
+- Sunsethue API (sunset predictions)
 - Expo Push Notifications

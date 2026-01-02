@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet } from "react-native";
 
-type Quality = "Poor" | "Fair" | "Good" | "Great";
+type Quality = "Poor" | "Fair" | "Good" | "Great" | "Excellent";
 
 interface Props {
   quality: Quality;
@@ -11,6 +11,7 @@ const QUALITY_COLORS: Record<Quality, string> = {
   Fair: "#f4a261",
   Good: "#e9c46a",
   Great: "#ff6b35",
+  Excellent: "#ffd166",
 };
 
 const QUALITY_EMOJI: Record<Quality, string> = {
@@ -18,6 +19,7 @@ const QUALITY_EMOJI: Record<Quality, string> = {
   Fair: "🌤️",
   Good: "🌅",
   Great: "🔥",
+  Excellent: "✨",
 };
 
 export default function QualityIndicator({ quality }: Props) {

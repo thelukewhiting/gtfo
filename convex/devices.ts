@@ -42,6 +42,7 @@ export const updateLocation = mutation({
     pushToken: v.string(),
     latitude: v.number(),
     longitude: v.number(),
+    timezone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const device = await ctx.db
@@ -55,7 +56,7 @@ export const updateLocation = mutation({
         pushToken: args.pushToken,
         latitude: args.latitude,
         longitude: args.longitude,
-        timezone: "UTC",
+        timezone: args.timezone ?? "UTC",
         lastLocationUpdate: Date.now(),
         notifyMorning: true,
         notifyHourBefore: true,
@@ -67,6 +68,7 @@ export const updateLocation = mutation({
     await ctx.db.patch(device._id, {
       latitude: args.latitude,
       longitude: args.longitude,
+      ...(args.timezone ? { timezone: args.timezone } : {}),
       lastLocationUpdate: Date.now(),
     });
   },

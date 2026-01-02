@@ -10,8 +10,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAction, useMutation, useQuery } from "convex/react";
+import * as Location from "expo-location";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../../convex/_generated/api";
 import { usePushToken } from "../../hooks/usePushToken";
+import { BACKGROUND_LOCATION_TASK } from "../../tasks/backgroundLocation";
 
 type QualityLevel = "Fair" | "Good" | "Great";
 
@@ -27,6 +30,7 @@ export default function SettingsScreen() {
   const [notifyMorning, setNotifyMorning] = useState(true);
   const [notifyHourBefore, setNotifyHourBefore] = useState(true);
   const [minQuality, setMinQuality] = useState<QualityLevel>("Good");
+  const [backgroundTracking, setBackgroundTracking] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [testSent, setTestSent] = useState(false);
 
@@ -37,6 +41,21 @@ export default function SettingsScreen() {
       setMinQuality(device.minQuality);
     }
   }, [device]);
+
+  useEffect(() => {
+    // Check if background tracking is currently enabled
+    const checkBackgroundStatus = async () => {
+      try {
+        const hasStarted = await Location.hasStartedLocationUpdatesAsync(
+          BACKGROUND_LOCATION_TASK
+        );
+        setBackgroundTracking(hasStarted);
+      } catch {
+        setBackgroundTracking(false);
+      }
+    };
+    checkBackgroundStatus();
+  }, []);
 
   const handleToggleMorning = async (value: boolean) => {
     setNotifyMorning(value);
@@ -56,6 +75,41 @@ export default function SettingsScreen() {
     setMinQuality(quality);
     if (pushToken) {
       await updatePreferences({ pushToken, minQuality: quality });
+    }
+  };
+
+  const handleToggleBackgroundTracking = async (value: boolean) => {
+    try {
+      if (value) {
+        const { status } = await Location.requestBackgroundPermissionsAsync();
+        if (status !== "granted") {
+          return;
+        }
+        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+          accuracy: Location.Accuracy.Balanced,
+          distanceInterval: 1000,
+          timeInterval: 10 * 60 * 1000,
+          pausesUpdatesAutomatically: true,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: "GTFO is tracking location",
+            notificationBody: "Keeping sunset predictions accurate while you travel.",
+          },
+        });
+        setBackgroundTracking(true);
+        await AsyncStorage.setItem("backgroundTrackingEnabled", "true");
+      } else {
+        const hasStarted = await Location.hasStartedLocationUpdatesAsync(
+          BACKGROUND_LOCATION_TASK
+        );
+        if (hasStarted) {
+          await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+        }
+        setBackgroundTracking(false);
+        await AsyncStorage.setItem("backgroundTrackingEnabled", "false");
+      }
+    } catch (error) {
+      console.log("Failed to toggle background tracking:", error);
     }
   };
 
@@ -158,11 +212,29 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Location</Text>
+
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Background Tracking</Text>
+              <Text style={styles.rowSubtitle}>
+                Update predictions while traveling
+              </Text>
+            </View>
+            <Switch
+              value={backgroundTracking}
+              onValueChange={handleToggleBackgroundTracking}
+              trackColor={{ false: "#333", true: "#ff6b35" }}
+              thumbColor="#fff"
+            />
+          </View>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
           <Text style={styles.aboutText}>
-            GTFO uses SunsetWX to predict sunset quality based on cloud cover,
-            humidity, and atmospheric conditions. Predictions update daily at
-            10am local time.
+            GTFO uses Sunsethue to predict sunset quality based on cloud cover
+            and atmospheric conditions. Predictions update daily.
           </Text>
         </View>
 

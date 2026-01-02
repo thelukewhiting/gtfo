@@ -15,7 +15,7 @@ import { usePushToken } from "../../hooks/usePushToken";
 import QualityIndicator from "../../components/QualityIndicator";
 
 interface SunsetData {
-  quality: "Poor" | "Fair" | "Good" | "Great";
+  quality: "Poor" | "Fair" | "Good" | "Great" | "Excellent";
   qualityPercent: number;
   sunsetTime: string;
   isDemo?: boolean;
@@ -41,6 +41,7 @@ export default function HomeScreen() {
       const data = await getSunsetQuality({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
+        date: getLocalDateString(),
       });
       setSunsetData(data);
     } catch (error) {
@@ -69,6 +70,14 @@ export default function HomeScreen() {
       minute: "2-digit",
       hour12: true,
     });
+  };
+
+  const getLocalDateString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   };
 
   if (errorMsg) {
@@ -113,14 +122,16 @@ export default function HomeScreen() {
             <Text style={styles.time}>
               {formatSunsetTime(sunsetData.sunsetTime)}
             </Text>
-            {sunsetData.quality === "Great" || sunsetData.quality === "Good" ? (
+            {sunsetData.quality === "Excellent" ||
+            sunsetData.quality === "Great" ||
+            sunsetData.quality === "Good" ? (
               <Text style={styles.goOutside}>Time to find a spot!</Text>
             ) : (
               <Text style={styles.stayInside}>Maybe tomorrow...</Text>
             )}
             {sunsetData.isDemo && (
               <Text style={styles.demoNote}>
-                Add SUNSETWX_API_KEY for real data
+                Add SUNSETHUE_API_KEY for real data
               </Text>
             )}
           </View>
