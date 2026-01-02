@@ -29,6 +29,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [placeName, setPlaceName] = useState<string | null>(null);
+  const [lastGeocodedCoords, setLastGeocodedCoords] = useState<{lat: number, lng: number} | null>(null);
 
   const getSunsetQuality = useAction(api.sunsets.getSunsetQuality);
   const device = useQuery(
@@ -62,11 +63,31 @@ export default function HomeScreen() {
     }
   };
 
+  // Calculate distance between two coordinates in km
+  const getDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  };
+
   useEffect(() => {
-    console.log("Location changed:", location?.coords);
     if (location) {
       fetchSunset();
-      fetchPlaceName();
+      // Only reverse geocode if moved >5km or first time
+      const shouldGeocode = !lastGeocodedCoords ||
+        getDistanceKm(
+          location.coords.latitude,
+          location.coords.longitude,
+          lastGeocodedCoords.lat,
+          lastGeocodedCoords.lng
+        ) > 5;
+      if (shouldGeocode) {
+        fetchPlaceName();
+      }
     }
   }, [location]);
 
@@ -77,14 +98,16 @@ export default function HomeScreen() {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
       });
-      console.log("Reverse geocode result:", place);
       if (place) {
         const name = place.city || place.subregion || place.region || place.country;
-        console.log("Setting place name:", name);
         setPlaceName(name || null);
+        setLastGeocodedCoords({
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+        });
       }
     } catch (error) {
-      console.log("Failed to get place name:", error);
+      // Silently fail - place name is optional
     }
   };
 
