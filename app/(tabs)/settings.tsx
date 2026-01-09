@@ -18,6 +18,32 @@ import { BACKGROUND_LOCATION_TASK } from "../../tasks/backgroundLocation";
 
 type QualityLevel = "Fair" | "Good" | "Great";
 
+interface DebugResult {
+  success: boolean;
+  device: {
+    found: boolean;
+    notifyMorning?: boolean;
+    notifyHourBefore?: boolean;
+    minQuality?: string;
+    latitude?: number;
+    longitude?: number;
+    timezone?: string;
+  };
+  sunset: {
+    fetched: boolean;
+    quality?: string;
+    qualityPercent?: number;
+    sunsetTime?: string;
+    isDemo?: boolean;
+    error?: string;
+  };
+  notification: {
+    wouldSend: boolean;
+    reason: string;
+    threshold?: number;
+  };
+}
+
 export default function SettingsScreen() {
   const { pushToken } = usePushToken();
   const device = useQuery(
@@ -26,6 +52,7 @@ export default function SettingsScreen() {
   );
   const updatePreferences = useMutation(api.devices.updatePreferences);
   const sendTestNotification = useAction(api.sunsets.sendTestNotification);
+  const debugSunsetCheck = useAction(api.sunsets.debugSunsetCheck);
 
   const [notifyMorning, setNotifyMorning] = useState(true);
   const [notifyHourBefore, setNotifyHourBefore] = useState(true);
@@ -33,6 +60,8 @@ export default function SettingsScreen() {
   const [backgroundTracking, setBackgroundTracking] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [testSent, setTestSent] = useState(false);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugResult, setDebugResult] = useState<DebugResult | null>(null);
 
   useEffect(() => {
     if (device) {
@@ -87,8 +116,8 @@ export default function SettingsScreen() {
         }
         await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
           accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 1000,
-          timeInterval: 10 * 60 * 1000,
+          distanceInterval: 8000, // ~5 miles
+          timeInterval: 60 * 60 * 1000, // 1 hour
           pausesUpdatesAutomatically: true,
           showsBackgroundLocationIndicator: true,
           foregroundService: {
@@ -129,6 +158,33 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleDebugCheck = async () => {
+    if (!pushToken) return;
+
+    setDebugLoading(true);
+    try {
+      const result = await debugSunsetCheck({ pushToken });
+      setDebugResult(result);
+    } catch (error) {
+      console.error("Debug check failed:", error);
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
+  const formatSunsetTime = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -139,9 +195,9 @@ export default function SettingsScreen() {
 
           <View style={styles.row}>
             <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Morning Alert (11am)</Text>
+              <Text style={styles.rowTitle}>Morning Alert</Text>
               <Text style={styles.rowSubtitle}>
-                Get notified after predictions update
+                Get notified around 11am local time
               </Text>
             </View>
             <Switch
@@ -236,6 +292,63 @@ export default function SettingsScreen() {
             GTFO uses Sunsethue to predict sunset quality based on cloud cover
             and atmospheric conditions. Predictions update daily.
           </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Debug</Text>
+          <Text style={styles.sectionSubtitle}>
+            Check why you did or didn't get a notification today
+          </Text>
+
+          <TouchableOpacity
+            style={styles.testButton}
+            onPress={handleDebugCheck}
+            disabled={debugLoading || !pushToken}
+          >
+            {debugLoading ? (
+              <ActivityIndicator color="#ff6b35" size="small" />
+            ) : (
+              <Text style={styles.testButtonText}>Check Today's Sunset</Text>
+            )}
+          </TouchableOpacity>
+
+          {debugResult && (
+            <View style={styles.debugResults}>
+              <View style={styles.debugCard}>
+                <Text style={styles.debugCardTitle}>Today's Prediction</Text>
+                {debugResult.sunset.fetched ? (
+                  <>
+                    <Text style={styles.debugQuality}>
+                      {debugResult.sunset.quality} ({debugResult.sunset.qualityPercent}%)
+                    </Text>
+                    <Text style={styles.debugDetail}>
+                      Sunset at {formatSunsetTime(debugResult.sunset.sunsetTime!)}
+                    </Text>
+                    {debugResult.sunset.isDemo && (
+                      <Text style={styles.debugWarning}>Demo mode (API key not configured)</Text>
+                    )}
+                  </>
+                ) : (
+                  <Text style={styles.debugError}>{debugResult.sunset.error}</Text>
+                )}
+              </View>
+
+              <View
+                style={[
+                  styles.debugCard,
+                  debugResult.notification.wouldSend
+                    ? styles.debugCardSuccess
+                    : styles.debugCardWarning,
+                ]}
+              >
+                <Text style={styles.debugCardTitle}>Notification Status</Text>
+                <Text style={styles.debugStatus}>
+                  {debugResult.notification.wouldSend ? "Would send" : "Would NOT send"}
+                </Text>
+                <Text style={styles.debugReason}>{debugResult.notification.reason}</Text>
+              </View>
+            </View>
+          )}
         </View>
 
         {device && (
@@ -351,5 +464,57 @@ const styles = StyleSheet.create({
     color: "#444",
     textAlign: "center",
     marginTop: 20,
+  },
+  debugResults: {
+    marginTop: 16,
+    gap: 12,
+  },
+  debugCard: {
+    backgroundColor: "#16213e",
+    borderRadius: 12,
+    padding: 16,
+  },
+  debugCardSuccess: {
+    borderWidth: 2,
+    borderColor: "#4a9c3e",
+  },
+  debugCardWarning: {
+    borderWidth: 2,
+    borderColor: "#c9a227",
+  },
+  debugCardTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#888",
+    marginBottom: 8,
+  },
+  debugQuality: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  debugDetail: {
+    fontSize: 14,
+    color: "#888",
+    marginTop: 4,
+  },
+  debugWarning: {
+    fontSize: 12,
+    color: "#c9a227",
+    marginTop: 8,
+  },
+  debugError: {
+    fontSize: 14,
+    color: "#e74c3c",
+  },
+  debugStatus: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  debugReason: {
+    fontSize: 14,
+    color: "#888",
+    marginTop: 4,
   },
 });

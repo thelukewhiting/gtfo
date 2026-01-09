@@ -3,12 +3,11 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-// Run at 11:00 AM UTC every day
-// Users in different timezones will get notifications at different local times
-// For a production app, you'd want to batch by timezone
-crons.daily(
+// Run every hour to check for devices where it's currently 11 AM local time
+// This ensures users get notifications at 11 AM in their timezone
+crons.interval(
   "morning sunset check",
-  { hourUTC: 11, minuteUTC: 0 },
+  { hours: 1 },
   internal.sunsets.checkMorningSunsets
 );
 

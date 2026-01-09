@@ -255,6 +255,21 @@ const QUALITY_THRESHOLD: Record<string, number> = {
   Excellent: 81,
 };
 
+function getLocalHour(timezone: string | undefined): number | null {
+  try {
+    if (!timezone) return null;
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hour12: false,
+    });
+    return parseInt(formatter.format(now), 10);
+  } catch {
+    return null;
+  }
+}
+
 export const checkMorningSunsets = internalAction({
   args: {},
   handler: async (ctx) => {
@@ -269,6 +284,18 @@ export const checkMorningSunsets = internalAction({
 
     for (const device of devices) {
       if (!device.notifyMorning) continue;
+
+      // Only notify devices where it's currently 11 AM - 4 PM local time
+      // This gives the API multiple chances if data isn't ready at 11 AM
+      const localHour = getLocalHour(device.timezone);
+      if (localHour === null || localHour < 11 || localHour > 16) continue;
+
+      // Check if we already sent a morning notification today (deduplication)
+      const alreadySentToday = await ctx.runQuery(
+        internal.sunsets.hasMorningNotificationToday,
+        { deviceId: device._id, timezone: device.timezone }
+      );
+      if (alreadySentToday) continue;
 
       const dateStr = formatDateForTimezone(new Date(), device.timezone);
       const quality = isDemoMode
@@ -407,5 +434,187 @@ export const sendTestNotification = action({
       "GTFO is working! You'll get notified about great sunsets."
     );
     return { success: true };
+  },
+});
+
+export const debugSunsetCheck = action({
+  args: {
+    pushToken: v.string(),
+  },
+  handler: async (ctx, args): Promise<{
+    success: boolean;
+    device: {
+      found: boolean;
+      notifyMorning?: boolean;
+      notifyHourBefore?: boolean;
+      minQuality?: string;
+      latitude?: number;
+      longitude?: number;
+      timezone?: string;
+    };
+    sunset: {
+      fetched: boolean;
+      quality?: string;
+      qualityPercent?: number;
+      sunsetTime?: string;
+      isDemo?: boolean;
+      error?: string;
+    };
+    notification: {
+      wouldSend: boolean;
+      reason: string;
+      threshold?: number;
+    };
+  }> => {
+    const apiKey = process.env.SUNSETHUE_API_KEY;
+    const isDemoMode = !apiKey;
+
+    // Find device
+    const device = await ctx.runQuery(internal.sunsets.getDeviceByToken, {
+      pushToken: args.pushToken,
+    });
+
+    if (!device) {
+      return {
+        success: false,
+        device: { found: false },
+        sunset: { fetched: false, error: "Device not found" },
+        notification: { wouldSend: false, reason: "Device not registered in database" },
+      };
+    }
+
+    const deviceInfo = {
+      found: true,
+      notifyMorning: device.notifyMorning,
+      notifyHourBefore: device.notifyHourBefore,
+      minQuality: device.minQuality,
+      latitude: device.latitude,
+      longitude: device.longitude,
+      timezone: device.timezone,
+    };
+
+    // Fetch sunset quality
+    const dateStr = formatDateForTimezone(new Date(), device.timezone);
+    let quality: SunsetQuality | null;
+
+    if (isDemoMode) {
+      quality = generateMockSunset(device.latitude);
+    } else {
+      quality = await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
+    }
+
+    if (!quality) {
+      return {
+        success: true,
+        device: deviceInfo,
+        sunset: { fetched: false, error: "API returned no data (model_data may not be ready yet)" },
+        notification: { wouldSend: false, reason: "No sunset data available from API" },
+      };
+    }
+
+    const sunsetInfo = {
+      fetched: true,
+      quality: quality.quality,
+      qualityPercent: quality.qualityPercent,
+      sunsetTime: quality.sunsetTime,
+      isDemo: isDemoMode || quality.isDemo,
+    };
+
+    // Check threshold
+    const threshold = QUALITY_THRESHOLD[device.minQuality];
+    const meetsThreshold = quality.qualityPercent >= threshold;
+
+    if (!device.notifyMorning) {
+      return {
+        success: true,
+        device: deviceInfo,
+        sunset: sunsetInfo,
+        notification: {
+          wouldSend: false,
+          reason: "Morning notifications are disabled in settings",
+          threshold,
+        },
+      };
+    }
+
+    if (!meetsThreshold) {
+      return {
+        success: true,
+        device: deviceInfo,
+        sunset: sunsetInfo,
+        notification: {
+          wouldSend: false,
+          reason: `Quality ${quality.qualityPercent}% is below your "${device.minQuality}" threshold (${threshold}%)`,
+          threshold,
+        },
+      };
+    }
+
+    return {
+      success: true,
+      device: deviceInfo,
+      sunset: sunsetInfo,
+      notification: {
+        wouldSend: true,
+        reason: `Quality ${quality.qualityPercent}% meets "${device.minQuality}" threshold (${threshold}%)`,
+        threshold,
+      },
+    };
+  },
+});
+
+export const getDeviceByToken = internalQuery({
+  args: { pushToken: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("devices")
+      .withIndex("by_push_token", (q) => q.eq("pushToken", args.pushToken))
+      .first();
+  },
+});
+
+export const getRecentNotifications = internalQuery({
+  args: { deviceId: v.id("devices"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_device", (q) => q.eq("deviceId", args.deviceId))
+      .order("desc")
+      .take(args.limit ?? 10);
+    return notifications;
+  },
+});
+
+export const hasMorningNotificationToday = internalQuery({
+  args: { deviceId: v.id("devices"), timezone: v.string() },
+  handler: async (ctx, args) => {
+    // Get today's date in the device's timezone
+    const now = new Date();
+    let todayStart: number;
+    try {
+      const formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: args.timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const todayStr = formatter.format(now);
+      // Parse as start of day in UTC (good enough for dedup purposes)
+      todayStart = new Date(todayStr + "T00:00:00Z").getTime();
+    } catch {
+      // Fallback: use UTC date
+      todayStart = new Date(now.toISOString().split("T")[0] + "T00:00:00Z").getTime();
+    }
+
+    // Check if any morning notification was sent today
+    const recentNotifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_device", (q) => q.eq("deviceId", args.deviceId))
+      .order("desc")
+      .take(5);
+
+    return recentNotifications.some(
+      (n) => n.type === "morning" && n.sentAt >= todayStart
+    );
   },
 });
