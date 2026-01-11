@@ -35,6 +35,7 @@ export const register = mutation({
       lastLocationUpdate: Date.now(),
       notifyMorning: true,
       notifyHourBefore: true,
+      notifyTenMinBefore: true,
       minQuality: "Good",
     });
   },
@@ -63,6 +64,7 @@ export const updateLocation = mutation({
         lastLocationUpdate: Date.now(),
         notifyMorning: true,
         notifyHourBefore: true,
+        notifyTenMinBefore: true,
         minQuality: "Good",
       });
       return;

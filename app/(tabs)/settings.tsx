@@ -59,7 +59,7 @@ export default function SettingsScreen() {
 
   const [notifyMorning, setNotifyMorning] = useState(true);
   const [notifyHourBefore, setNotifyHourBefore] = useState(true);
-  const [notifyTenMinBefore, setNotifyTenMinBefore] = useState(false);
+  const [notifyTenMinBefore, setNotifyTenMinBefore] = useState(true);
   const [minQuality, setMinQuality] = useState<QualityLevel>("Good");
   const [backgroundTracking, setBackgroundTracking] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
