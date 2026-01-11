@@ -20,6 +20,12 @@ interface SunsetData {
   qualityPercent: number;
   sunsetTime: string;
   isDemo?: boolean;
+  cloudCover?: number;
+  sunsetAzimuth?: number;
+  goldenHourStart?: string;
+  goldenHourEnd?: string;
+  blueHourStart?: string;
+  blueHourEnd?: string;
 }
 
 export default function HomeScreen() {
@@ -163,13 +169,32 @@ export default function HomeScreen() {
             <Text style={styles.time}>
               {formatSunsetTime(sunsetData.sunsetTime)}
             </Text>
-            {sunsetData.quality === "Excellent" ||
-            sunsetData.quality === "Great" ||
-            sunsetData.quality === "Good" ? (
-              <Text style={styles.goOutside}>Time to find a spot!</Text>
-            ) : (
-              <Text style={styles.stayInside}>Maybe tomorrow...</Text>
+
+            {sunsetData.cloudCover !== undefined && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Cloud Cover</Text>
+                <Text style={styles.infoValue}>{sunsetData.cloudCover}%</Text>
+              </View>
             )}
+
+            {sunsetData.goldenHourStart && sunsetData.goldenHourEnd && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Golden Hour</Text>
+                <Text style={styles.infoValue}>
+                  {formatSunsetTime(sunsetData.goldenHourStart)} - {formatSunsetTime(sunsetData.goldenHourEnd)}
+                </Text>
+              </View>
+            )}
+
+            {sunsetData.blueHourStart && sunsetData.blueHourEnd && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Blue Hour</Text>
+                <Text style={styles.infoValue}>
+                  {formatSunsetTime(sunsetData.blueHourStart)} - {formatSunsetTime(sunsetData.blueHourEnd)}
+                </Text>
+              </View>
+            )}
+
             {sunsetData.isDemo && (
               <Text style={styles.demoNote}>
                 Add SUNSETHUE_API_KEY for real data
@@ -248,16 +273,23 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#fff",
   },
-  goOutside: {
-    fontSize: 18,
-    color: "#ff6b35",
-    marginTop: 30,
-    fontWeight: "600",
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#2a3a5e",
   },
-  stayInside: {
-    fontSize: 18,
-    color: "#666",
-    marginTop: 30,
+  infoLabel: {
+    fontSize: 14,
+    color: "#888",
+  },
+  infoValue: {
+    fontSize: 14,
+    color: "#fff",
+    fontWeight: "500",
   },
   noData: {
     fontSize: 16,
