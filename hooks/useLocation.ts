@@ -91,8 +91,8 @@ export function useLocation() {
             if (!hasStarted) {
               await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
                 accuracy: Location.Accuracy.Balanced,
-                distanceInterval: 1000,
-                timeInterval: 10 * 60 * 1000,
+                distanceInterval: 8000, // ~5 miles - sunset quality doesn't vary much within this
+                timeInterval: 60 * 60 * 1000, // 1 hour max
                 pausesUpdatesAutomatically: true,
                 showsBackgroundLocationIndicator: true,
                 foregroundService: {

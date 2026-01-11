@@ -1,6 +1,9 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+// Round coordinates to 2 decimal places (~1.1km accuracy) for privacy
+const fuzzLocation = (coord: number) => Math.round(coord * 100) / 100;
+
 export const register = mutation({
   args: {
     pushToken: v.string(),
@@ -16,8 +19,8 @@ export const register = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        latitude: args.latitude,
-        longitude: args.longitude,
+        latitude: fuzzLocation(args.latitude),
+        longitude: fuzzLocation(args.longitude),
         timezone: args.timezone,
         lastLocationUpdate: Date.now(),
       });
@@ -26,8 +29,8 @@ export const register = mutation({
 
     return await ctx.db.insert("devices", {
       pushToken: args.pushToken,
-      latitude: args.latitude,
-      longitude: args.longitude,
+      latitude: fuzzLocation(args.latitude),
+      longitude: fuzzLocation(args.longitude),
       timezone: args.timezone,
       lastLocationUpdate: Date.now(),
       notifyMorning: true,
@@ -54,8 +57,8 @@ export const updateLocation = mutation({
       // Auto-register device if not found
       await ctx.db.insert("devices", {
         pushToken: args.pushToken,
-        latitude: args.latitude,
-        longitude: args.longitude,
+        latitude: fuzzLocation(args.latitude),
+        longitude: fuzzLocation(args.longitude),
         timezone: args.timezone ?? "UTC",
         lastLocationUpdate: Date.now(),
         notifyMorning: true,
@@ -66,8 +69,8 @@ export const updateLocation = mutation({
     }
 
     await ctx.db.patch(device._id, {
-      latitude: args.latitude,
-      longitude: args.longitude,
+      latitude: fuzzLocation(args.latitude),
+      longitude: fuzzLocation(args.longitude),
       ...(args.timezone ? { timezone: args.timezone } : {}),
       lastLocationUpdate: Date.now(),
     });
