@@ -11,6 +11,13 @@ interface SunsetQuality {
   sunsetTime: string;
   validAt: string;
   isDemo?: boolean;
+  // Additional API fields
+  cloudCover?: number; // percentage 0-100
+  sunsetAzimuth?: number; // degrees from north (direction)
+  goldenHourStart?: string;
+  goldenHourEnd?: string;
+  blueHourStart?: string;
+  blueHourEnd?: string;
 }
 
 function normalizeQualityText(value: string | undefined): SunsetQuality["quality"] | null {
@@ -48,7 +55,53 @@ function formatDateForTimezone(date: Date, timeZone: string | undefined): string
   }
 }
 
-function generateMockSunset(latitude: number): SunsetQuality {
+// Convert a local time (hour:minute) in a timezone to UTC ISO string
+function localTimeToUTC(dateStr: string, hour: number, minute: number, timezone?: string): string {
+  const localTimeStr = `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+
+  if (!timezone) {
+    return localTimeStr;
+  }
+
+  try {
+    // Strategy: binary search to find the UTC time that displays as our target local time
+    // Start with a guess (treat local time as UTC, then adjust)
+    const naiveUtc = new Date(`${localTimeStr}Z`).getTime();
+
+    // Format a date in the target timezone and extract hour/minute
+    const getLocalTime = (utcMs: number): { hour: number; minute: number } => {
+      const d = new Date(utcMs);
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(d);
+      const h = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+      const m = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+      return { hour: h, minute: m };
+    };
+
+    // Calculate how far off we are and adjust
+    const targetMinutes = hour * 60 + minute;
+    const guessLocal = getLocalTime(naiveUtc);
+    const guessMinutes = guessLocal.hour * 60 + guessLocal.minute;
+
+    let diffMinutes = guessMinutes - targetMinutes;
+    // Handle day wraparound
+    if (diffMinutes > 720) diffMinutes -= 1440;
+    if (diffMinutes < -720) diffMinutes += 1440;
+
+    // Adjust: if local shows later than target, we need earlier UTC (subtract the diff)
+    const correctedUtc = naiveUtc - diffMinutes * 60 * 1000;
+
+    return new Date(correctedUtc).toISOString();
+  } catch {
+    return localTimeStr;
+  }
+}
+
+function generateMockSunset(latitude: number, timezone?: string): SunsetQuality {
   // Generate a pseudo-random quality based on current date (so it's consistent within a day)
   const today = new Date();
   const dayOfYear = Math.floor(
@@ -73,24 +126,29 @@ function generateMockSunset(latitude: number): SunsetQuality {
     qualityPercent = 76 + (seed % 24);
   }
 
-  // Calculate approximate sunset time
-  // For demo, use a fixed evening time that makes sense (5:00 PM - 7:30 PM range)
-  // Vary slightly based on day of year for realism
-  const baseMinutes = 17 * 60 + 30; // 5:30 PM in minutes
-  const seasonalOffset = Math.sin((dayOfYear - 80) * 2 * Math.PI / 365) * 90; // +/- 90 minutes
+  // Calculate approximate sunset time (5:00 PM - 7:30 PM range based on season)
+  const baseMinutes = 17 * 60 + 30; // 5:30 PM
+  const seasonalOffset = Math.sin((dayOfYear - 80) * 2 * Math.PI / 365) * 90;
   const sunsetMinutes = Math.round(baseMinutes + seasonalOffset);
 
-  const sunsetHour = Math.floor(sunsetMinutes / 60);
-  const sunsetMin = sunsetMinutes % 60;
+  const dateStr = formatDateForTimezone(today, timezone);
 
-  // Return time as a simple string that will be parsed correctly on client
-  // Format: today's date with the calculated evening time
-  const year = today.getUTCFullYear();
-  const month = String(today.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(today.getUTCDate()).padStart(2, '0');
+  // Helper to create UTC ISO string from local minutes
+  const makeTimeString = (minutes: number): string => {
+    const hour = Math.floor(minutes / 60) % 24;
+    const min = minutes % 60;
+    return localTimeToUTC(dateStr, hour, min, timezone);
+  };
 
-  // Create ISO string with the sunset time (treating it as local time for display)
-  const sunsetTime = `${year}-${month}-${day}T${String(sunsetHour).padStart(2, '0')}:${String(sunsetMin).padStart(2, '0')}:00`;
+  const sunsetTime = makeTimeString(sunsetMinutes);
+  const goldenHourStart = makeTimeString(sunsetMinutes - 60);
+  const goldenHourEnd = sunsetTime;
+  const blueHourStart = sunsetTime;
+  const blueHourEnd = makeTimeString(sunsetMinutes + 30);
+
+  // Demo cloud cover and direction
+  const cloudCover = 30 + (seed % 40); // 30-70%
+  const sunsetAzimuth = 240 + (dayOfYear * 0.2) % 60; // ~240-300 degrees (W to WNW)
 
   return {
     quality,
@@ -98,6 +156,12 @@ function generateMockSunset(latitude: number): SunsetQuality {
     sunsetTime,
     validAt: sunsetTime,
     isDemo: true,
+    cloudCover,
+    sunsetAzimuth,
+    goldenHourStart,
+    goldenHourEnd,
+    blueHourStart,
+    blueHourEnd,
   };
 }
 
@@ -152,11 +216,25 @@ async function fetchSunsetQuality(
     // quality is 0-1, convert to percent
     const qualityPercent = Math.round(data.quality * 100);
 
+    // Extract additional fields from API response
+    // Cloud cover (may be cloud_cover or clouds, normalize to percentage)
+    const cloudCover = typeof data.cloud_cover === "number"
+      ? Math.round(data.cloud_cover * 100)
+      : typeof data.clouds === "number"
+        ? Math.round(data.clouds * 100)
+        : undefined;
+
     return {
       quality: qualityText,
       qualityPercent,
       sunsetTime: data.time,
       validAt: data.time,
+      cloudCover,
+      sunsetAzimuth: data.direction,
+      goldenHourStart: data.magics?.golden_hour?.[0],
+      goldenHourEnd: data.magics?.golden_hour?.[1],
+      blueHourStart: data.magics?.blue_hour?.[0],
+      blueHourEnd: data.magics?.blue_hour?.[1],
     };
   } catch (error) {
     console.error("Failed to fetch sunset quality:", error);
@@ -216,6 +294,7 @@ export const schedulePendingReminder = internalMutation({
     sunsetTime: v.string(),
     quality: v.string(),
     qualityPercent: v.number(),
+    reminderType: v.optional(v.union(v.literal("hour"), v.literal("tenmin"))),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("pendingReminders", {
@@ -224,6 +303,7 @@ export const schedulePendingReminder = internalMutation({
       sunsetTime: args.sunsetTime,
       quality: args.quality,
       qualityPercent: args.qualityPercent,
+      reminderType: args.reminderType,
     });
   },
 });
@@ -299,7 +379,7 @@ export const checkMorningSunsets = internalAction({
 
       const dateStr = formatDateForTimezone(new Date(), device.timezone);
       const quality = isDemoMode
-        ? generateMockSunset(device.latitude)
+        ? generateMockSunset(device.latitude, device.timezone)
         : await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
 
       if (!quality) continue;
@@ -311,7 +391,7 @@ export const checkMorningSunsets = internalAction({
       await sendPushNotification(
         device.pushToken,
         "Tonight's sunset looks " + quality.quality + "!",
-        `${quality.quality} sunset (${Math.round(quality.qualityPercent)}%) expected at ${formatTime(quality.sunsetTime)}. Time to find a good spot!`
+        `${quality.quality} sunset (${Math.round(quality.qualityPercent)}%) expected at ${formatTime(quality.sunsetTime, device.timezone)}. Time to find a good spot!`
       );
 
       await ctx.runMutation(internal.sunsets.recordNotification, {
@@ -322,9 +402,10 @@ export const checkMorningSunsets = internalAction({
         qualityPercent: quality.qualityPercent,
       });
 
-      // Schedule reminder if enabled
+      // Schedule reminders if enabled
+      const sunsetTimestamp = new Date(quality.sunsetTime).getTime();
+
       if (device.notifyHourBefore) {
-        const sunsetTimestamp = new Date(quality.sunsetTime).getTime();
         const reminderTime = sunsetTimestamp - 60 * 60 * 1000; // 1 hour before
 
         if (reminderTime > Date.now()) {
@@ -334,6 +415,22 @@ export const checkMorningSunsets = internalAction({
             sunsetTime: quality.sunsetTime,
             quality: quality.quality,
             qualityPercent: quality.qualityPercent,
+            reminderType: "hour",
+          });
+        }
+      }
+
+      if (device.notifyTenMinBefore) {
+        const tenMinReminderTime = sunsetTimestamp - 10 * 60 * 1000; // 10 minutes before
+
+        if (tenMinReminderTime > Date.now()) {
+          await ctx.runMutation(internal.sunsets.schedulePendingReminder, {
+            deviceId: device._id,
+            scheduledFor: tenMinReminderTime,
+            sunsetTime: quality.sunsetTime,
+            quality: quality.quality,
+            qualityPercent: quality.qualityPercent,
+            reminderType: "tenmin",
           });
         }
       }
@@ -354,11 +451,13 @@ export const sendDueReminders = internalAction({
       });
 
       if (device) {
-        await sendPushNotification(
-          device.pushToken,
-          "Head outside now!",
-          `${reminder.quality} sunset in about 1 hour. GTFO and enjoy it!`
-        );
+        const isTenMin = reminder.reminderType === "tenmin";
+        const title = isTenMin ? "Sunset starting soon!" : "Head outside now!";
+        const body = isTenMin
+          ? `${reminder.quality} sunset in about 10 minutes. GTFO!`
+          : `${reminder.quality} sunset in about 1 hour. GTFO and enjoy it!`;
+
+        await sendPushNotification(device.pushToken, title, body);
 
         await ctx.runMutation(internal.sunsets.recordNotification, {
           deviceId: device._id,
@@ -414,13 +513,23 @@ async function sendPushNotification(
   }
 }
 
-function formatTime(isoString: string): string {
+function formatTime(isoString: string, timezone?: string): string {
   const date = new Date(isoString);
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  try {
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: timezone,
+    });
+  } catch {
+    // Fallback if timezone is invalid
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
 }
 
 export const sendTestNotification = action({
@@ -428,12 +537,37 @@ export const sendTestNotification = action({
     pushToken: v.string(),
   },
   handler: async (ctx, args) => {
+    // Verify the device exists before sending - prevents arbitrary token abuse
+    const device = await ctx.runQuery(internal.sunsets.getDeviceByToken, {
+      pushToken: args.pushToken,
+    });
+    if (!device) {
+      throw new Error("Device not registered");
+    }
+
     await sendPushNotification(
       args.pushToken,
       "Test Notification",
       "GTFO is working! You'll get notified about great sunsets."
     );
     return { success: true };
+  },
+});
+
+// Internal only - prevents public abuse for mass notifications
+export const broadcastNotification = internalAction({
+  args: {
+    title: v.string(),
+    body: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const devices = await ctx.runQuery(internal.sunsets.getAllDevices);
+    let sent = 0;
+    for (const device of devices) {
+      await sendPushNotification(device.pushToken, args.title, args.body);
+      sent++;
+    }
+    return { sent };
   },
 });
 
@@ -498,7 +632,7 @@ export const debugSunsetCheck = action({
     let quality: SunsetQuality | null;
 
     if (isDemoMode) {
-      quality = generateMockSunset(device.latitude);
+      quality = generateMockSunset(device.latitude, device.timezone);
     } else {
       quality = await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
     }

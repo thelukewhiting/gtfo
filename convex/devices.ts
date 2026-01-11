@@ -79,6 +79,7 @@ export const updatePreferences = mutation({
     pushToken: v.string(),
     notifyMorning: v.optional(v.boolean()),
     notifyHourBefore: v.optional(v.boolean()),
+    notifyTenMinBefore: v.optional(v.boolean()),
     minQuality: v.optional(v.union(v.literal("Fair"), v.literal("Good"), v.literal("Great"))),
   },
   handler: async (ctx, args) => {
@@ -94,11 +95,13 @@ export const updatePreferences = mutation({
     const updates: Partial<{
       notifyMorning: boolean;
       notifyHourBefore: boolean;
+      notifyTenMinBefore: boolean;
       minQuality: "Fair" | "Good" | "Great";
     }> = {};
 
     if (args.notifyMorning !== undefined) updates.notifyMorning = args.notifyMorning;
     if (args.notifyHourBefore !== undefined) updates.notifyHourBefore = args.notifyHourBefore;
+    if (args.notifyTenMinBefore !== undefined) updates.notifyTenMinBefore = args.notifyTenMinBefore;
     if (args.minQuality !== undefined) updates.minQuality = args.minQuality;
 
     await ctx.db.patch(device._id, updates);

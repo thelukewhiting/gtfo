@@ -10,6 +10,7 @@ export default defineSchema({
     lastLocationUpdate: v.number(),
     notifyMorning: v.boolean(),
     notifyHourBefore: v.boolean(),
+    notifyTenMinBefore: v.optional(v.boolean()),
     minQuality: v.union(v.literal("Fair"), v.literal("Good"), v.literal("Great")),
   }).index("by_push_token", ["pushToken"]),
 
@@ -28,5 +29,6 @@ export default defineSchema({
     sunsetTime: v.string(),
     quality: v.string(),
     qualityPercent: v.number(),
+    reminderType: v.optional(v.union(v.literal("hour"), v.literal("tenmin"))),
   }).index("by_scheduled_time", ["scheduledFor"]),
 });

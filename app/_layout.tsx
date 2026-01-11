@@ -1,12 +1,32 @@
 import { useEffect, useState } from "react";
+import { View, Text, StyleSheet } from "react-native";
 import { Stack } from "expo-router";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const convex = new ConvexReactClient(
-  process.env.EXPO_PUBLIC_CONVEX_URL as string
-);
+const CONVEX_URL = process.env.EXPO_PUBLIC_CONVEX_URL;
+
+function ConfigError() {
+  return (
+    <View style={styles.errorContainer}>
+      <Text style={styles.errorTitle}>Configuration Error</Text>
+      <Text style={styles.errorText}>
+        EXPO_PUBLIC_CONVEX_URL is not configured.{"\n"}
+        Please check your environment setup.
+      </Text>
+    </View>
+  );
+}
+
+let convex: ConvexReactClient | null = null;
+try {
+  if (CONVEX_URL) {
+    convex = new ConvexReactClient(CONVEX_URL);
+  }
+} catch (e) {
+  console.error("Failed to initialize Convex client:", e);
+}
 
 export default function RootLayout() {
   const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
@@ -16,6 +36,14 @@ export default function RootLayout() {
       setHasOnboarded(value === "true");
     });
   }, []);
+
+  if (!convex) {
+    return (
+      <SafeAreaProvider>
+        <ConfigError />
+      </SafeAreaProvider>
+    );
+  }
 
   if (hasOnboarded === null) {
     return null;
@@ -35,3 +63,25 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  errorContainer: {
+    flex: 1,
+    backgroundColor: "#1a1a2e",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#ff6b6b",
+    marginBottom: 16,
+  },
+  errorText: {
+    fontSize: 16,
+    color: "#888",
+    textAlign: "center",
+    lineHeight: 24,
+  },
+});

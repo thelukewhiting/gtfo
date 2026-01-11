@@ -2,7 +2,7 @@
   "expo": {
     "name": "GTFO",
     "slug": "gtfo",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -66,6 +66,7 @@
       ]
     ],
     "extra": {
+      "developerEmail": "zestos@gmail.com",
       "eas": {
         "projectId": "90d787dd-b2fc-491c-a76b-3b230076b678"
       },

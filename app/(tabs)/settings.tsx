@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../../convex/_generated/api";
 import { usePushToken } from "../../hooks/usePushToken";
 import { BACKGROUND_LOCATION_TASK } from "../../tasks/backgroundLocation";
+
+const DEV_TAP_COUNT = 7;
+const DEV_TAP_TIMEOUT = 3000; // 3 seconds to complete taps
 
 type QualityLevel = "Fair" | "Good" | "Great";
 
@@ -56,20 +59,35 @@ export default function SettingsScreen() {
 
   const [notifyMorning, setNotifyMorning] = useState(true);
   const [notifyHourBefore, setNotifyHourBefore] = useState(true);
+  const [notifyTenMinBefore, setNotifyTenMinBefore] = useState(false);
   const [minQuality, setMinQuality] = useState<QualityLevel>("Good");
   const [backgroundTracking, setBackgroundTracking] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [testSent, setTestSent] = useState(false);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugResult, setDebugResult] = useState<DebugResult | null>(null);
+  const [devModeUnlocked, setDevModeUnlocked] = useState(false);
+
+  const tapCountRef = useRef(0);
+  const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (device) {
       setNotifyMorning(device.notifyMorning);
       setNotifyHourBefore(device.notifyHourBefore);
+      setNotifyTenMinBefore(device.notifyTenMinBefore ?? false);
       setMinQuality(device.minQuality);
     }
   }, [device]);
+
+  useEffect(() => {
+    // Check if dev mode was previously unlocked
+    AsyncStorage.getItem("devModeUnlocked").then((value) => {
+      if (value === "true") {
+        setDevModeUnlocked(true);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     // Check if background tracking is currently enabled
@@ -97,6 +115,31 @@ export default function SettingsScreen() {
     setNotifyHourBefore(value);
     if (pushToken) {
       await updatePreferences({ pushToken, notifyHourBefore: value });
+    }
+  };
+
+  const handleToggleTenMinBefore = async (value: boolean) => {
+    setNotifyTenMinBefore(value);
+    if (pushToken) {
+      await updatePreferences({ pushToken, notifyTenMinBefore: value });
+    }
+  };
+
+  const handleAboutTap = () => {
+    tapCountRef.current += 1;
+
+    if (tapTimeoutRef.current) {
+      clearTimeout(tapTimeoutRef.current);
+    }
+
+    if (tapCountRef.current >= DEV_TAP_COUNT) {
+      setDevModeUnlocked(true);
+      AsyncStorage.setItem("devModeUnlocked", "true");
+      tapCountRef.current = 0;
+    } else {
+      tapTimeoutRef.current = setTimeout(() => {
+        tapCountRef.current = 0;
+      }, DEV_TAP_TIMEOUT);
     }
   };
 
@@ -212,7 +255,7 @@ export default function SettingsScreen() {
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>1 Hour Reminder</Text>
               <Text style={styles.rowSubtitle}>
-                Reminder before sunset starts
+                Reminder 1 hour before sunset
               </Text>
             </View>
             <Switch
@@ -223,19 +266,20 @@ export default function SettingsScreen() {
             />
           </View>
 
-          <TouchableOpacity
-            style={[styles.testButton, testSent && styles.testButtonSuccess]}
-            onPress={handleTestNotification}
-            disabled={sendingTest || !pushToken}
-          >
-            {sendingTest ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.testButtonText}>
-                {testSent ? "Sent!" : "Send Test Notification"}
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>10 Minute Reminder</Text>
+              <Text style={styles.rowSubtitle}>
+                Last call before sunset starts
               </Text>
-            )}
-          </TouchableOpacity>
+            </View>
+            <Switch
+              value={notifyTenMinBefore}
+              onValueChange={handleToggleTenMinBefore}
+              trackColor={{ false: "#333", true: "#ff6b35" }}
+              thumbColor="#fff"
+            />
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -287,69 +331,87 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About</Text>
+          <TouchableOpacity onPress={handleAboutTap} activeOpacity={1}>
+            <Text style={styles.sectionTitle}>About</Text>
+          </TouchableOpacity>
           <Text style={styles.aboutText}>
             GTFO uses Sunsethue to predict sunset quality based on cloud cover
             and atmospheric conditions. Predictions update daily.
           </Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Debug</Text>
-          <Text style={styles.sectionSubtitle}>
-            Check why you did or didn't get a notification today
-          </Text>
+        {(__DEV__ || devModeUnlocked) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Debug</Text>
+            <Text style={styles.sectionSubtitle}>
+              Check why you did or didn't get a notification today
+            </Text>
 
-          <TouchableOpacity
-            style={styles.testButton}
-            onPress={handleDebugCheck}
-            disabled={debugLoading || !pushToken}
-          >
-            {debugLoading ? (
-              <ActivityIndicator color="#ff6b35" size="small" />
-            ) : (
-              <Text style={styles.testButtonText}>Check Today's Sunset</Text>
-            )}
-          </TouchableOpacity>
-
-          {debugResult && (
-            <View style={styles.debugResults}>
-              <View style={styles.debugCard}>
-                <Text style={styles.debugCardTitle}>Today's Prediction</Text>
-                {debugResult.sunset.fetched ? (
-                  <>
-                    <Text style={styles.debugQuality}>
-                      {debugResult.sunset.quality} ({debugResult.sunset.qualityPercent}%)
-                    </Text>
-                    <Text style={styles.debugDetail}>
-                      Sunset at {formatSunsetTime(debugResult.sunset.sunsetTime!)}
-                    </Text>
-                    {debugResult.sunset.isDemo && (
-                      <Text style={styles.debugWarning}>Demo mode (API key not configured)</Text>
-                    )}
-                  </>
-                ) : (
-                  <Text style={styles.debugError}>{debugResult.sunset.error}</Text>
-                )}
-              </View>
-
-              <View
-                style={[
-                  styles.debugCard,
-                  debugResult.notification.wouldSend
-                    ? styles.debugCardSuccess
-                    : styles.debugCardWarning,
-                ]}
-              >
-                <Text style={styles.debugCardTitle}>Notification Status</Text>
-                <Text style={styles.debugStatus}>
-                  {debugResult.notification.wouldSend ? "Would send" : "Would NOT send"}
+            <TouchableOpacity
+              style={[styles.testButton, testSent && styles.testButtonSuccess]}
+              onPress={handleTestNotification}
+              disabled={sendingTest || !pushToken}
+            >
+              {sendingTest ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.testButtonText}>
+                  {testSent ? "Sent!" : "Send Test Notification"}
                 </Text>
-                <Text style={styles.debugReason}>{debugResult.notification.reason}</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.testButton, { marginTop: 12 }]}
+              onPress={handleDebugCheck}
+              disabled={debugLoading || !pushToken}
+            >
+              {debugLoading ? (
+                <ActivityIndicator color="#ff6b35" size="small" />
+              ) : (
+                <Text style={styles.testButtonText}>Check Today's Sunset</Text>
+              )}
+            </TouchableOpacity>
+
+            {debugResult && (
+              <View style={styles.debugResults}>
+                <View style={styles.debugCard}>
+                  <Text style={styles.debugCardTitle}>Today's Prediction</Text>
+                  {debugResult.sunset.fetched ? (
+                    <>
+                      <Text style={styles.debugQuality}>
+                        {debugResult.sunset.quality} ({debugResult.sunset.qualityPercent}%)
+                      </Text>
+                      <Text style={styles.debugDetail}>
+                        Sunset at {formatSunsetTime(debugResult.sunset.sunsetTime!)}
+                      </Text>
+                      {debugResult.sunset.isDemo && (
+                        <Text style={styles.debugWarning}>Demo mode (API key not configured)</Text>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.debugError}>{debugResult.sunset.error}</Text>
+                  )}
+                </View>
+
+                <View
+                  style={[
+                    styles.debugCard,
+                    debugResult.notification.wouldSend
+                      ? styles.debugCardSuccess
+                      : styles.debugCardWarning,
+                  ]}
+                >
+                  <Text style={styles.debugCardTitle}>Notification Status</Text>
+                  <Text style={styles.debugStatus}>
+                    {debugResult.notification.wouldSend ? "Would send" : "Would NOT send"}
+                  </Text>
+                  <Text style={styles.debugReason}>{debugResult.notification.reason}</Text>
+                </View>
               </View>
-            </View>
-          )}
-        </View>
+            )}
+          </View>
+        )}
 
         {device && (
           <Text style={styles.deviceInfo}>
