@@ -28,6 +28,11 @@ interface SunsetData {
   blueHourEnd?: string;
 }
 
+// DEBUG: Set to true to test elapsed sunset state
+const DEBUG_FORCE_ELAPSED = false;
+// DEBUG: Set to true to simulate tomorrow's forecast not being available
+const DEBUG_NO_TOMORROW = false;
+
 export default function HomeScreen() {
   const { location, errorMsg } = useLocation();
   usePushToken(); // Initialize push notifications
@@ -36,11 +41,13 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [placeName, setPlaceName] = useState<string | null>(null);
   const [lastGeocodedCoords, setLastGeocodedCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [isTomorrow, setIsTomorrow] = useState(false);
 
   const getSunsetQuality = useAction(api.sunsets.getSunsetQuality);
 
-  const getLocalDateString = () => {
+  const getLocalDateString = (offsetDays = 0) => {
     const now = new Date();
+    now.setDate(now.getDate() + offsetDays);
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
@@ -51,12 +58,40 @@ export default function HomeScreen() {
     if (!location) return;
 
     try {
-      const data = await getSunsetQuality({
+      // First, fetch today's sunset
+      const todayData = await getSunsetQuality({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         date: getLocalDateString(),
       });
-      setSunsetData(data);
+
+      // Check if today's sunset has already passed
+      const todaySunsetPassed = DEBUG_FORCE_ELAPSED || (todayData
+        ? new Date(todayData.sunsetTime).getTime() < Date.now()
+        : false);
+
+      if (todaySunsetPassed) {
+        // Try to fetch tomorrow's forecast
+        const tomorrowData = DEBUG_NO_TOMORROW ? null : await getSunsetQuality({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          date: getLocalDateString(1),
+        });
+
+        if (tomorrowData) {
+          // Tomorrow's forecast is available
+          setSunsetData(tomorrowData);
+          setIsTomorrow(true);
+        } else {
+          // Tomorrow's forecast not available, show today's (elapsed)
+          setSunsetData(todayData);
+          setIsTomorrow(false);
+        }
+      } else {
+        // Today's sunset hasn't passed yet
+        setSunsetData(todayData);
+        setIsTomorrow(false);
+      }
     } catch (error) {
       console.error("Failed to fetch sunset:", error);
     } finally {
@@ -127,6 +162,17 @@ export default function HomeScreen() {
     });
   };
 
+  // Determine if we're showing an elapsed sunset (today's sunset that has passed)
+  const isElapsed = !isTomorrow && sunsetData
+    ? (DEBUG_FORCE_ELAPSED || new Date(sunsetData.sunsetTime).getTime() < Date.now())
+    : false;
+
+  // Determine subtitle text
+  const getSubtitle = () => {
+    if (isTomorrow) return "Tomorrow's Sunset";
+    return "Tonight's Sunset";
+  };
+
   if (errorMsg) {
     return (
       <SafeAreaView style={styles.container}>
@@ -150,23 +196,32 @@ export default function HomeScreen() {
         }
       >
         <Text style={styles.title}>GTFO</Text>
-        <Text style={styles.subtitle}>Tonight's Sunset</Text>
+        <Text style={styles.subtitle}>{getSubtitle()}</Text>
 
         {loading ? (
           <ActivityIndicator size="large" color="#ff6b35" style={styles.loader} />
         ) : sunsetData ? (
-          <View style={styles.card}>
-            {sunsetData.isDemo && (
+          <View style={[styles.card, isElapsed && styles.cardElapsed]}>
+            {isElapsed && (
+              <View style={styles.elapsedBadge}>
+                <Text style={styles.elapsedBadgeText}>PAST SUNSET</Text>
+              </View>
+            )}
+            {sunsetData.isDemo && !isElapsed && (
               <View style={styles.demoBadge}>
                 <Text style={styles.demoBadgeText}>DEMO MODE</Text>
               </View>
             )}
-            <QualityIndicator quality={sunsetData.quality} />
-            <Text style={styles.percent}>
+            <View style={isElapsed ? { opacity: 0.5 } : undefined}>
+              <QualityIndicator quality={sunsetData.quality} />
+            </View>
+            <Text style={[styles.percent, isElapsed && styles.textElapsed]}>
               {Math.round(sunsetData.qualityPercent)}%
             </Text>
-            <Text style={styles.timeLabel}>Sunset at</Text>
-            <Text style={styles.time}>
+            <Text style={styles.timeLabel}>
+              {isElapsed ? "Sunset was at" : "Sunset at"}
+            </Text>
+            <Text style={[styles.time, isElapsed && styles.textElapsed]}>
               {formatSunsetTime(sunsetData.sunsetTime)}
             </Text>
 
@@ -195,9 +250,15 @@ export default function HomeScreen() {
               </View>
             )}
 
-            {sunsetData.isDemo && (
+            {sunsetData.isDemo && !isElapsed && (
               <Text style={styles.demoNote}>
                 Add SUNSETHUE_API_KEY for real data
+              </Text>
+            )}
+
+            {isElapsed && (
+              <Text style={styles.elapsedNote}>
+                Tomorrow's forecast coming soon
               </Text>
             )}
           </View>
@@ -324,5 +385,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#666",
     marginTop: 16,
+  },
+  cardElapsed: {
+    opacity: 0.85,
+    borderWidth: 1,
+    borderColor: "#2a3a5e",
+  },
+  elapsedBadge: {
+    backgroundColor: "#4a4a5e",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  elapsedBadgeText: {
+    color: "#aaa",
+    fontSize: 11,
+    fontWeight: "bold",
+    letterSpacing: 1,
+  },
+  textElapsed: {
+    opacity: 0.6,
+  },
+  elapsedNote: {
+    fontSize: 13,
+    color: "#888",
+    marginTop: 20,
+    fontStyle: "italic",
   },
 });
