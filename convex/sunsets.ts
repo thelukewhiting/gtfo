@@ -165,12 +165,16 @@ function generateMockSunset(latitude: number, timezone?: string): SunsetQuality 
   };
 }
 
+type FetchResult =
+  | { success: true; data: SunsetQuality }
+  | { success: false; error: string; statusCode?: number };
+
 async function fetchSunsetQuality(
   latitude: number,
   longitude: number,
   apiKey: string,
   dateStr: string
-): Promise<SunsetQuality | null> {
+): Promise<FetchResult> {
   try {
     const response = await fetch(
       `${SUNSETHUE_API_URL}/event?latitude=${latitude}&longitude=${longitude}&date=${dateStr}&type=sunset`,
@@ -182,8 +186,9 @@ async function fetchSunsetQuality(
     );
 
     if (!response.ok) {
-      console.error("Sunsethue API error:", response.status);
-      return null;
+      const errorText = await response.text();
+      console.error("Sunsethue API error:", response.status, errorText);
+      return { success: false, error: `HTTP ${response.status}: ${errorText}`, statusCode: response.status };
     }
 
     const result = await response.json();
@@ -191,7 +196,7 @@ async function fetchSunsetQuality(
     // Handle error responses
     if (typeof result.status === "number" && (result.status === 400 || result.status === 500)) {
       console.error("Sunsethue API returned error:", result.code, result.message);
-      return null;
+      return { success: false, error: `API error ${result.code}: ${result.message}`, statusCode: result.status };
     }
 
     const data = result.data;
@@ -199,18 +204,18 @@ async function fetchSunsetQuality(
     // Check if model data is available
     if (!data || !data.model_data) {
       console.log("No model data available for this location/date");
-      return null;
+      return { success: false, error: "No model data available for this location/date" };
     }
 
     if (typeof data.quality !== "number") {
       console.error("Sunsethue API missing quality data");
-      return null;
+      return { success: false, error: "API response missing quality data" };
     }
 
     const qualityText = normalizeQualityText(data.quality_text);
     if (!qualityText) {
       console.error("Sunsethue API returned unknown quality_text:", data.quality_text);
-      return null;
+      return { success: false, error: `Unknown quality_text: ${data.quality_text}` };
     }
 
     // quality is 0-1, convert to percent
@@ -225,20 +230,23 @@ async function fetchSunsetQuality(
         : undefined;
 
     return {
-      quality: qualityText,
-      qualityPercent,
-      sunsetTime: data.time,
-      validAt: data.time,
-      cloudCover,
-      sunsetAzimuth: data.direction,
-      goldenHourStart: data.magics?.golden_hour?.[0],
-      goldenHourEnd: data.magics?.golden_hour?.[1],
-      blueHourStart: data.magics?.blue_hour?.[0],
-      blueHourEnd: data.magics?.blue_hour?.[1],
+      success: true,
+      data: {
+        quality: qualityText,
+        qualityPercent,
+        sunsetTime: data.time,
+        validAt: data.time,
+        cloudCover,
+        sunsetAzimuth: data.direction,
+        goldenHourStart: data.magics?.golden_hour?.[0],
+        goldenHourEnd: data.magics?.golden_hour?.[1],
+        blueHourStart: data.magics?.blue_hour?.[0],
+        blueHourEnd: data.magics?.blue_hour?.[1],
+      },
     };
   } catch (error) {
     console.error("Failed to fetch sunset quality:", error);
-    return null;
+    return { success: false, error: `Exception: ${error}` };
   }
 }
 
@@ -256,7 +264,8 @@ export const getSunsetQuality = action({
       return generateMockSunset(args.latitude);
     }
 
-    return await fetchSunsetQuality(args.latitude, args.longitude, apiKey, args.date);
+    const result = await fetchSunsetQuality(args.latitude, args.longitude, apiKey, args.date);
+    return result.success ? result.data : null;
   },
 });
 
@@ -378,9 +387,13 @@ export const checkMorningSunsets = internalAction({
       if (alreadySentToday) continue;
 
       const dateStr = formatDateForTimezone(new Date(), device.timezone);
-      const quality = isDemoMode
-        ? generateMockSunset(device.latitude, device.timezone)
-        : await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
+      let quality: SunsetQuality | null;
+      if (isDemoMode) {
+        quality = generateMockSunset(device.latitude, device.timezone);
+      } else {
+        const result = await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
+        quality = result.success ? result.data : null;
+      }
 
       if (!quality) continue;
 
@@ -441,6 +454,9 @@ export const checkMorningSunsets = internalAction({
 export const sendDueReminders = internalAction({
   args: {},
   handler: async (ctx) => {
+    const apiKey = process.env.SUNSETHUE_API_KEY;
+    const isDemoMode = !apiKey;
+
     const dueReminders = await ctx.runQuery(internal.sunsets.getDueReminders, {
       currentTime: Date.now(),
     });
@@ -451,21 +467,49 @@ export const sendDueReminders = internalAction({
       });
 
       if (device) {
-        const isTenMin = reminder.reminderType === "tenmin";
-        const title = isTenMin ? "Sunset starting soon!" : "Head outside now!";
-        const body = isTenMin
-          ? `${reminder.quality} sunset in about 10 minutes. GTFO!`
-          : `${reminder.quality} sunset in about 1 hour. GTFO and enjoy it!`;
+        // Re-check sunset quality at the device's CURRENT location
+        // This handles same-day travel (e.g., SF to Bodega Bay)
+        const dateStr = formatDateForTimezone(new Date(), device.timezone);
+        let currentQuality: SunsetQuality | null;
 
-        await sendPushNotification(device.pushToken, title, body);
+        if (isDemoMode) {
+          currentQuality = generateMockSunset(device.latitude, device.timezone);
+        } else {
+          const result = await fetchSunsetQuality(
+            device.latitude,
+            device.longitude,
+            apiKey!,
+            dateStr
+          );
+          currentQuality = result.success ? result.data : null;
+        }
 
-        await ctx.runMutation(internal.sunsets.recordNotification, {
-          deviceId: device._id,
-          type: "reminder",
-          sunsetTime: reminder.sunsetTime,
-          quality: reminder.quality,
-          qualityPercent: reminder.qualityPercent,
-        });
+        // Check if quality at current location still meets user's threshold
+        const threshold = QUALITY_THRESHOLD[device.minQuality];
+        const meetsThreshold = currentQuality && currentQuality.qualityPercent >= threshold;
+
+        if (meetsThreshold && currentQuality) {
+          const isTenMin = reminder.reminderType === "tenmin";
+          const title = isTenMin ? "Sunset starting soon!" : "Head outside now!";
+          const body = isTenMin
+            ? `${currentQuality.quality} sunset in about 10 minutes. GTFO!`
+            : `${currentQuality.quality} sunset in about 1 hour. GTFO and enjoy it!`;
+
+          await sendPushNotification(device.pushToken, title, body);
+
+          await ctx.runMutation(internal.sunsets.recordNotification, {
+            deviceId: device._id,
+            type: "reminder",
+            sunsetTime: currentQuality.sunsetTime,
+            quality: currentQuality.quality,
+            qualityPercent: currentQuality.qualityPercent,
+          });
+        } else {
+          console.log(
+            `Skipping reminder for device ${device._id}: quality at current location ` +
+            `(${currentQuality?.qualityPercent ?? 'unknown'}%) doesn't meet threshold (${threshold}%)`
+          );
+        }
       }
 
       await ctx.runMutation(internal.sunsets.deleteReminder, {
@@ -630,18 +674,25 @@ export const debugSunsetCheck = action({
     // Fetch sunset quality
     const dateStr = formatDateForTimezone(new Date(), device.timezone);
     let quality: SunsetQuality | null;
+    let fetchError: string | undefined;
 
     if (isDemoMode) {
       quality = generateMockSunset(device.latitude, device.timezone);
     } else {
-      quality = await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
+      const result = await fetchSunsetQuality(device.latitude, device.longitude, apiKey!, dateStr);
+      if (result.success) {
+        quality = result.data;
+      } else {
+        quality = null;
+        fetchError = result.error;
+      }
     }
 
     if (!quality) {
       return {
         success: true,
         device: deviceInfo,
-        sunset: { fetched: false, error: "API returned no data (model_data may not be ready yet)" },
+        sunset: { fetched: false, error: fetchError || "Unknown error fetching sunset data" },
         notification: { wouldSend: false, reason: "No sunset data available from API" },
       };
     }
