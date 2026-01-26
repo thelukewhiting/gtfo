@@ -32,15 +32,6 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="test"
-        options={{
-          title: "Test",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="flask" size={size} color={color} />
-          ),
-        }}
-      />
     </Tabs>
   );
 }
