@@ -38,6 +38,7 @@ credentials.json
 
 # local builds
 builds/
+*.ipa
 
 # typescript
 *.tsbuildinfo
