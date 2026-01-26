@@ -231,6 +231,10 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <Text style={styles.appName}>GTFO</Text>
+          <Text style={styles.appTagline}>Get The F*** Outside</Text>
+        </View>
         <Text style={styles.title}>Settings</Text>
 
         <View style={styles.section}>
@@ -431,12 +435,28 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#fff",
+  header: {
+    alignItems: "center",
     marginTop: 20,
-    marginBottom: 30,
+    marginBottom: 24,
+  },
+  appName: {
+    fontSize: 42,
+    fontWeight: "bold",
+    color: "#ff6b35",
+    letterSpacing: 6,
+  },
+  appTagline: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.4)",
+    marginTop: 4,
+    letterSpacing: 1,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "600",
+    color: "#fff",
+    marginBottom: 24,
   },
   section: {
     marginBottom: 30,
