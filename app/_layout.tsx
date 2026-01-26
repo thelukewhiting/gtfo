@@ -46,7 +46,11 @@ export default function RootLayout() {
   }
 
   if (hasOnboarded === null) {
-    return null;
+    return (
+      <SafeAreaProvider>
+        <View style={styles.loadingContainer} />
+      </SafeAreaProvider>
+    );
   }
 
   return (
@@ -65,6 +69,10 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: "#1a1a2e",
+  },
   errorContainer: {
     flex: 1,
     backgroundColor: "#1a1a2e",
