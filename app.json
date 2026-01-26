@@ -20,7 +20,6 @@
         "NSLocationAlwaysUsageDescription": "GTFO needs background location access to keep sunset predictions accurate when you travel.",
         "UIBackgroundModes": [
           "location",
-          "fetch",
           "remote-notification"
         ]
       }

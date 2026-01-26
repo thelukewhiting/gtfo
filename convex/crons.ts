@@ -11,10 +11,10 @@ crons.interval(
   internal.sunsets.checkMorningSunsets
 );
 
-// Check for due reminders every 5 minutes
+// Check for due reminders every 15 minutes
 crons.interval(
   "send due reminders",
-  { minutes: 5 },
+  { minutes: 15 },
   internal.sunsets.sendDueReminders
 );
 
