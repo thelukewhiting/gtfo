@@ -176,7 +176,7 @@ function FloatingParticle({ quality, delay, index }: { quality: Quality; delay: 
 function SunArc({ sunsetTime, quality }: { sunsetTime: string; quality: Quality }) {
   const sunPosition = useRef(new Animated.Value(0)).current;
   const glowScale = useRef(new Animated.Value(1)).current;
-  const glowOpacity = useRef(new Animated.Value(0.3)).current;
+  const glowOpacity = useRef(new Animated.Value(0.1)).current;
 
   useEffect(() => {
     const updatePosition = () => {
@@ -202,17 +202,21 @@ function SunArc({ sunsetTime, quality }: { sunsetTime: string; quality: Quality 
     return () => clearInterval(interval);
   }, [sunsetTime]);
 
-  // Glow animation - more dramatic for better quality
+  // Glow animation - smooth breathing effect
   useEffect(() => {
-    const config: Record<Quality, { speed: number; maxScale: number; maxOpacity: number }> = {
-      Poor: { speed: 5000, maxScale: 1.2, maxOpacity: 0.2 },
-      Fair: { speed: 4000, maxScale: 1.3, maxOpacity: 0.3 },
-      Good: { speed: 3000, maxScale: 1.4, maxOpacity: 0.4 },
-      Great: { speed: 2200, maxScale: 1.6, maxOpacity: 0.5 },
-      Excellent: { speed: 1800, maxScale: 1.8, maxOpacity: 0.6 },
+    const config: Record<Quality, { speed: number; maxScale: number; minOpacity: number; maxOpacity: number }> = {
+      Poor: { speed: 5000, maxScale: 1.2, minOpacity: 0.1, maxOpacity: 0.2 },
+      Fair: { speed: 4000, maxScale: 1.3, minOpacity: 0.15, maxOpacity: 0.3 },
+      Good: { speed: 3000, maxScale: 1.4, minOpacity: 0.2, maxOpacity: 0.4 },
+      Great: { speed: 2200, maxScale: 1.6, minOpacity: 0.25, maxOpacity: 0.5 },
+      Excellent: { speed: 1800, maxScale: 1.8, minOpacity: 0.3, maxOpacity: 0.6 },
     };
 
-    const { speed, maxScale, maxOpacity } = config[quality];
+    const { speed, maxScale, minOpacity, maxOpacity } = config[quality];
+
+    // Set initial values to match animation start
+    glowScale.setValue(1);
+    glowOpacity.setValue(minOpacity);
 
     const animation = Animated.loop(
       Animated.parallel([
@@ -238,7 +242,7 @@ function SunArc({ sunsetTime, quality }: { sunsetTime: string; quality: Quality 
             useNativeDriver: true,
           }),
           Animated.timing(glowOpacity, {
-            toValue: maxOpacity * 0.5,
+            toValue: minOpacity,
             duration: speed / 2,
             easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
@@ -252,7 +256,7 @@ function SunArc({ sunsetTime, quality }: { sunsetTime: string; quality: Quality 
 
   const sunColor = QUALITY_ACCENT[quality];
   const arcWidth = SCREEN_WIDTH - 60;
-  const arcHeight = 80;
+  const arcHeight = 55;
 
   // Generate arc dots
   const arcDots = useMemo(() => {
@@ -400,81 +404,6 @@ function Countdown({ sunsetTime, accentColor }: { sunsetTime: string; accentColo
   );
 }
 
-// Progress bar for golden/blue hour
-function HourProgressBar({
-  label,
-  startTime,
-  endTime,
-  color,
-}: {
-  label: string;
-  startTime: string;
-  endTime: string;
-  color: string;
-}) {
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<"upcoming" | "active" | "passed">("upcoming");
-
-  useEffect(() => {
-    const updateProgress = () => {
-      const now = new Date();
-      const start = new Date(startTime);
-      const end = new Date(endTime);
-
-      if (now < start) {
-        setStatus("upcoming");
-        setProgress(0);
-      } else if (now > end) {
-        setStatus("passed");
-        setProgress(1);
-      } else {
-        setStatus("active");
-        const total = end.getTime() - start.getTime();
-        const elapsed = now.getTime() - start.getTime();
-        setProgress(elapsed / total);
-      }
-    };
-
-    updateProgress();
-    const interval = setInterval(updateProgress, 1000);
-    return () => clearInterval(interval);
-  }, [startTime, endTime]);
-
-  const formatTime = (iso: string) => {
-    return new Date(iso).toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
-
-  return (
-    <View style={[styles.hourBar, status === "passed" && styles.hourBarPassed]}>
-      <View style={styles.hourBarHeader}>
-        <Text style={[styles.hourBarLabel, status === "active" && { color }]}>
-          {label}
-          {status === "active" && " • NOW"}
-        </Text>
-        <Text style={styles.hourBarTimes}>
-          {formatTime(startTime)} – {formatTime(endTime)}
-        </Text>
-      </View>
-      <View style={styles.hourBarTrack}>
-        <View
-          style={[
-            styles.hourBarFill,
-            {
-              backgroundColor: color,
-              width: `${progress * 100}%`,
-              opacity: status === "passed" ? 0.3 : 1,
-            },
-          ]}
-        />
-      </View>
-    </View>
-  );
-}
-
 export default function HomeScreen() {
   const { location, errorMsg, isManualMode, manualPlaceName, isBackgroundEnabled, refreshLocation } = useLocation();
   usePushToken();
@@ -605,6 +534,15 @@ export default function HomeScreen() {
     });
   };
 
+  const formatTimeShort = (isoString: string) => {
+    const date = new Date(isoString);
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).replace(" ", "").toLowerCase();
+  };
+
   const isElapsed =
     !isTomorrow && sunsetData
       ? DEBUG_FORCE_ELAPSED || new Date(sunsetData.sunsetTime).getTime() < Date.now()
@@ -695,23 +633,26 @@ export default function HomeScreen() {
               {/* Divider */}
               <View style={styles.divider} />
 
-              {/* Hour bars */}
-              {!isElapsed && sunsetData.goldenHourStart && sunsetData.goldenHourEnd && (
-                <HourProgressBar
-                  label="Golden Hour"
-                  startTime={sunsetData.goldenHourStart}
-                  endTime={sunsetData.goldenHourEnd}
-                  color="#e6a756"
-                />
-              )}
-
-              {!isElapsed && sunsetData.blueHourStart && sunsetData.blueHourEnd && (
-                <HourProgressBar
-                  label="Blue Hour"
-                  startTime={sunsetData.blueHourStart}
-                  endTime={sunsetData.blueHourEnd}
-                  color="#5b8bd6"
-                />
+              {/* Hour times - compact inline display */}
+              {!isElapsed && (sunsetData.goldenHourStart || sunsetData.blueHourStart) && (
+                <View style={styles.hourTimesRow}>
+                  {sunsetData.goldenHourStart && sunsetData.goldenHourEnd && (
+                    <View style={styles.hourTimeItem}>
+                      <Text style={[styles.hourTimeLabel, { color: "#e6a756" }]}>Golden</Text>
+                      <Text style={styles.hourTimeValue}>
+                        {formatTimeShort(sunsetData.goldenHourStart)}–{formatTimeShort(sunsetData.goldenHourEnd)}
+                      </Text>
+                    </View>
+                  )}
+                  {sunsetData.blueHourStart && sunsetData.blueHourEnd && (
+                    <View style={styles.hourTimeItem}>
+                      <Text style={[styles.hourTimeLabel, { color: "#5b8bd6" }]}>Blue</Text>
+                      <Text style={styles.hourTimeValue}>
+                        {formatTimeShort(sunsetData.blueHourStart)}–{formatTimeShort(sunsetData.blueHourEnd)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               )}
 
               {/* Cloud cover */}
@@ -724,21 +665,23 @@ export default function HomeScreen() {
 
               {isElapsed && <Text style={styles.elapsedNote}>Tomorrow's forecast coming soon</Text>}
 
-              {displayPlaceName && <Text style={styles.location}>{displayPlaceName}</Text>}
-              {(isManualMode || isBackgroundEnabled) && (
-                <View style={styles.locationBadgeRow}>
-                  {isManualMode && (
-                    <View style={[styles.locationBadge, styles.manualBadge]}>
-                      <Text style={styles.locationBadgeText}>MANUAL</Text>
-                    </View>
-                  )}
-                  {isBackgroundEnabled && !isManualMode && (
-                    <View style={[styles.locationBadge, styles.backgroundBadge]}>
-                      <Text style={styles.locationBadgeText}>BACKGROUND</Text>
-                    </View>
-                  )}
-                </View>
-              )}
+              <View style={styles.locationFooter}>
+                {displayPlaceName && <Text style={styles.location}>{displayPlaceName}</Text>}
+                {(isManualMode || isBackgroundEnabled) && (
+                  <View style={styles.locationBadgeRow}>
+                    {isManualMode && (
+                      <View style={[styles.locationBadge, styles.manualBadge]}>
+                        <Text style={styles.locationBadgeText}>MANUAL</Text>
+                      </View>
+                    )}
+                    {isBackgroundEnabled && !isManualMode && (
+                      <View style={[styles.locationBadge, styles.backgroundBadge]}>
+                        <Text style={styles.locationBadgeText}>BACKGROUND</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
             </View>
           ) : (
             <View style={styles.noDataContainer}>
@@ -763,7 +706,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingBottom: 20,
   },
   centered: {
     flex: 1,
@@ -771,10 +714,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 24,
   },
+  locationFooter: {
+    marginTop: "auto",
+    alignItems: "center",
+    paddingTop: 20,
+  },
   location: {
     fontSize: 14,
     color: "rgba(255,255,255,0.4)",
-    marginTop: 32,
   },
   loader: {
     marginTop: 100,
@@ -837,25 +784,25 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     alignItems: "center",
-    marginBottom: 32,
+    marginBottom: 40,
   },
   heroEmoji: {
-    fontSize: 80,
-    marginBottom: 8,
+    fontSize: 56,
+    marginBottom: 4,
   },
   heroQuality: {
-    fontSize: 52,
+    fontSize: 42,
     fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 8,
+    letterSpacing: 6,
   },
   sunArcWrapper: {
     width: "100%",
-    marginBottom: 32,
+    marginBottom: 16,
   },
   arcContainer: {
     width: "100%",
-    height: 100,
+    height: 70,
     alignItems: "center",
     justifyContent: "flex-end",
   },
@@ -912,10 +859,10 @@ const styles = StyleSheet.create({
   },
   countdownContainer: {
     alignItems: "center",
-    marginBottom: 24,
+    marginBottom: 12,
   },
   countdownTime: {
-    fontSize: 48,
+    fontSize: 40,
     fontWeight: "300",
     color: "#fff",
     letterSpacing: 2,
@@ -929,17 +876,17 @@ const styles = StyleSheet.create({
   },
   sunsetTimeSection: {
     alignItems: "center",
-    marginBottom: 24,
+    marginBottom: 12,
   },
   sunsetTimeLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: "rgba(255,255,255,0.4)",
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   sunsetTime: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: "600",
     letterSpacing: 1,
   },
@@ -947,44 +894,27 @@ const styles = StyleSheet.create({
     width: 60,
     height: 1,
     backgroundColor: "rgba(255,255,255,0.1)",
-    marginBottom: 24,
-  },
-  hourBar: {
-    width: "100%",
     marginBottom: 12,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    padding: 14,
   },
-  hourBarPassed: {
-    opacity: 0.4,
-  },
-  hourBarHeader: {
+  hourTimesRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
+    justifyContent: "center",
+    gap: 24,
+    marginBottom: 12,
   },
-  hourBarLabel: {
-    fontSize: 12,
+  hourTimeItem: {
+    alignItems: "center",
+  },
+  hourTimeLabel: {
+    fontSize: 11,
     fontWeight: "600",
-    color: "rgba(255,255,255,0.6)",
     textTransform: "uppercase",
     letterSpacing: 1,
+    marginBottom: 2,
   },
-  hourBarTimes: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.35)",
-  },
-  hourBarTrack: {
-    height: 4,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  hourBarFill: {
-    height: "100%",
-    borderRadius: 2,
+  hourTimeValue: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.5)",
   },
   metaRow: {
     flexDirection: "row",

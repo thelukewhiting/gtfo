@@ -34,6 +34,10 @@ export function useLocation() {
     let subscription: Location.LocationSubscription | null = null;
 
     async function startLocationUpdates() {
+      // Check background tracking preference (needed for badge display)
+      const bgEnabledPref = await AsyncStorage.getItem("backgroundTrackingEnabled");
+      setIsBackgroundEnabled(bgEnabledPref === "true");
+
       // Check for manual mode first
       const manualDataStr = await AsyncStorage.getItem(MANUAL_LOCATION_KEY);
       if (manualDataStr) {
@@ -149,20 +153,8 @@ export function useLocation() {
               },
             });
           }
-          setIsBackgroundEnabled(true);
         } catch (error) {
           console.log("Background location updates not available:", error);
-          setIsBackgroundEnabled(false);
-        }
-      } else {
-        // Check if background tracking is actually running
-        try {
-          const hasStarted = await Location.hasStartedLocationUpdatesAsync(
-            BACKGROUND_LOCATION_TASK
-          );
-          setIsBackgroundEnabled(hasStarted);
-        } catch {
-          setIsBackgroundEnabled(false);
         }
       }
 
