@@ -1,126 +1,54 @@
-# GTFO - Sunset Notification App
+# GTFO - Sunset Quality Predictions
 
-Never miss a beautiful sunset again. GTFO monitors sunset predictions and notifies you when there's a particularly good one coming in your area.
+A React Native app that predicts sunset quality and sends notifications for great sunsets.
 
-## Setup
-
-### 1. Install dependencies
+## Development
 
 ```bash
-npm install
-```
-
-### 2. Configure Convex backend
-
-```bash
-npx convex dev
-```
-
-This will:
-- Create a new Convex project (or connect to existing one)
-- Generate TypeScript types
-- Start the development server
-
-### 3. Set environment variables
-
-Create a `.env.local` file:
-
-```bash
-EXPO_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
-```
-
-In the Convex dashboard, add the Sunsethue API key:
-- Go to Settings > Environment Variables
-- Add `SUNSETHUE_API_KEY` with your API key
-
-### 4. Get Sunsethue API access
-
-Sign up at https://sunsethue.com/dev-api to get your API key (free tier: 1,000 credits/day).
-
-### 5. Run the app
-
-```bash
-# Terminal 1: Convex backend
-npm run dev:convex
-
-# Terminal 2: Expo app
+# Start the development server
 npm start
+
+# Run Convex backend in development
+npm run dev:convex
 ```
 
-## Architecture
+## Building & Deploying
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   iOS App       │────▶│   Convex        │────▶│  Sunsethue API  │
-│   (Expo)        │     │   Backend       │     │                 │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        │                       │
-        │                       ▼
-        └──────────────▶  Expo Push Notifications
-```
+### iOS TestFlight Build
 
-## Features
-
-- **Sunset quality predictions** - Based on cloud cover and atmospheric conditions
-- **Morning notifications (11am)** - After Sunsethue predictions update
-- **1 hour reminders** - Configurable alert before sunset starts
-- **Quality threshold** - Only get notified for Good or Great sunsets
-- **Background location** - Predictions update as you travel
-
-## Tech Stack
-
-- React Native (Expo)
-- Convex (backend)
-- Sunsethue API (sunset predictions)
-- Expo Push Notifications
-
-## Building for TestFlight
-
-### Prerequisites
-
-- Xcode installed with command line tools
-- Apple Developer account
-- EAS CLI: `npm install -g eas-cli`
-- Logged into EAS: `eas login`
-
-### Build and Submit
+Build locally and submit to TestFlight:
 
 ```bash
-# 1. Build locally for App Store/TestFlight (auto-increments build number)
-eas build --platform ios --profile production --local
+# Build locally (requires Xcode and EAS CLI)
+eas build --platform ios --profile production --local --non-interactive
 
-# 2. Submit to TestFlight
+# Submit the latest build to TestFlight
 eas submit --platform ios --latest
 ```
 
-The first time you run the build, EAS will prompt you to log into your Apple Developer account to generate/fetch signing credentials.
+The build process:
+1. Increments the build number automatically
+2. Uses cached Apple credentials (must be logged in via `eas credentials` first)
+3. Produces an `.ipa` file in the project root
+4. Submit uploads to App Store Connect for TestFlight distribution
 
-### Build Profiles (eas.json)
-
-| Profile | Purpose | Distribution |
-|---------|---------|--------------|
-| `production` | App Store / TestFlight | App Store Connect |
-| `preview` | Internal testing | Ad-hoc (registered devices) |
-| `simulator` | iOS Simulator | N/A |
-
-### Quick Reference
+### First-time Setup
 
 ```bash
-# Build for simulator testing
-eas build --platform ios --profile simulator --local
+# Install EAS CLI globally
+npm install -g eas-cli
 
-# Build for internal testers (ad-hoc)
-eas build --platform ios --profile preview --local
+# Login to Expo account
+eas login
 
-# Check current credentials
-eas credentials --platform ios
-
-# View build history
-eas build:list
+# Configure Apple credentials (one-time)
+eas credentials
 ```
 
-### Troubleshooting
+## Project Structure
 
-- **Credentials issues**: Run `eas credentials --platform ios` to manage certificates/profiles
-- **Build number conflicts**: The `production` profile auto-increments; check App Store Connect for current build number
-- **Pod install fails**: Run `cd ios && pod install --repo-update`
+- `app/` - Expo Router screens and layouts
+- `components/` - Reusable React components
+- `convex/` - Convex backend functions and schema
+- `hooks/` - Custom React hooks
+- `tasks/` - Background task definitions
