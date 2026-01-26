@@ -7,12 +7,19 @@ import { api } from "../convex/_generated/api";
 
 export const BACKGROUND_LOCATION_TASK = "background-location-updates";
 const PUSH_TOKEN_KEY = "expoPushToken";
+const MANUAL_LOCATION_KEY = "manualLocation";
 const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
 const convexClient = convexUrl ? new ConvexHttpClient(convexUrl) : null;
 
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.log("Background location task error:", error);
+    return;
+  }
+
+  // Skip updates when in manual location mode
+  const manualData = await AsyncStorage.getItem(MANUAL_LOCATION_KEY);
+  if (manualData) {
     return;
   }
 

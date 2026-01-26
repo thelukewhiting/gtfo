@@ -12,6 +12,10 @@ export default defineSchema({
     notifyHourBefore: v.boolean(),
     notifyTenMinBefore: v.optional(v.boolean()),
     minQuality: v.union(v.literal("Fair"), v.literal("Good"), v.literal("Great")),
+    locationMode: v.optional(v.union(v.literal("auto"), v.literal("manual"))),
+    manualLatitude: v.optional(v.number()),
+    manualLongitude: v.optional(v.number()),
+    manualPlaceName: v.optional(v.string()),
   }).index("by_push_token", ["pushToken"]),
 
   notifications: defineTable({

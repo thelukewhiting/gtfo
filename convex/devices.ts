@@ -70,12 +70,56 @@ export const updateLocation = mutation({
       return;
     }
 
+    // Skip GPS updates when in manual mode
+    if (device.locationMode === "manual") {
+      return;
+    }
+
     await ctx.db.patch(device._id, {
       latitude: fuzzLocation(args.latitude),
       longitude: fuzzLocation(args.longitude),
       ...(args.timezone ? { timezone: args.timezone } : {}),
       lastLocationUpdate: Date.now(),
     });
+  },
+});
+
+export const updateLocationMode = mutation({
+  args: {
+    pushToken: v.string(),
+    locationMode: v.union(v.literal("auto"), v.literal("manual")),
+    manualLatitude: v.optional(v.number()),
+    manualLongitude: v.optional(v.number()),
+    manualPlaceName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const device = await ctx.db
+      .query("devices")
+      .withIndex("by_push_token", (q) => q.eq("pushToken", args.pushToken))
+      .first();
+
+    if (!device) {
+      throw new Error("Device not found");
+    }
+
+    if (args.locationMode === "manual") {
+      if (args.manualLatitude === undefined || args.manualLongitude === undefined) {
+        throw new Error("Manual mode requires coordinates");
+      }
+      await ctx.db.patch(device._id, {
+        locationMode: "manual",
+        manualLatitude: fuzzLocation(args.manualLatitude),
+        manualLongitude: fuzzLocation(args.manualLongitude),
+        manualPlaceName: args.manualPlaceName,
+        latitude: fuzzLocation(args.manualLatitude),
+        longitude: fuzzLocation(args.manualLongitude),
+        lastLocationUpdate: Date.now(),
+      });
+    } else {
+      await ctx.db.patch(device._id, {
+        locationMode: "auto",
+      });
+    }
   },
 });
 

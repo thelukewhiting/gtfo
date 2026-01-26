@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAction } from "convex/react";
+import { useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
 import { api } from "../../convex/_generated/api";
 import { useLocation } from "../../hooks/useLocation";
@@ -475,7 +476,7 @@ function HourProgressBar({
 }
 
 export default function HomeScreen() {
-  const { location, errorMsg } = useLocation();
+  const { location, errorMsg, isManualMode, manualPlaceName, isBackgroundEnabled, refreshLocation } = useLocation();
   usePushToken();
   const [sunsetData, setSunsetData] = useState<SunsetData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -485,6 +486,18 @@ export default function HomeScreen() {
   const [isTomorrow, setIsTomorrow] = useState(false);
 
   const getSunsetQuality = useAction(api.sunsets.getSunsetQuality);
+
+  // Refresh location and sunset data when tab gains focus (to pick up manual location changes from settings)
+  const [focusTrigger, setFocusTrigger] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      refreshLocation();
+      setFocusTrigger(prev => prev + 1);
+    }, [refreshLocation])
+  );
+
+  // Use manual place name when in manual mode
+  const displayPlaceName = isManualMode ? manualPlaceName : placeName;
 
   const getLocalDateString = (offsetDays = 0) => {
     const now = new Date();
@@ -552,11 +565,11 @@ export default function HomeScreen() {
       const shouldGeocode =
         !lastGeocodedCoords ||
         getDistanceKm(location.coords.latitude, location.coords.longitude, lastGeocodedCoords.lat, lastGeocodedCoords.lng) > 5;
-      if (shouldGeocode) {
+      if (shouldGeocode && !isManualMode) {
         fetchPlaceName();
       }
     }
-  }, [location]);
+  }, [location, focusTrigger]);
 
   const fetchPlaceName = async () => {
     if (!location) return;
@@ -711,7 +724,21 @@ export default function HomeScreen() {
 
               {isElapsed && <Text style={styles.elapsedNote}>Tomorrow's forecast coming soon</Text>}
 
-              {placeName && <Text style={styles.location}>{placeName}</Text>}
+              {displayPlaceName && <Text style={styles.location}>{displayPlaceName}</Text>}
+              {(isManualMode || isBackgroundEnabled) && (
+                <View style={styles.locationBadgeRow}>
+                  {isManualMode && (
+                    <View style={[styles.locationBadge, styles.manualBadge]}>
+                      <Text style={styles.locationBadgeText}>MANUAL</Text>
+                    </View>
+                  )}
+                  {isBackgroundEnabled && !isManualMode && (
+                    <View style={[styles.locationBadge, styles.backgroundBadge]}>
+                      <Text style={styles.locationBadgeText}>BACKGROUND</Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
           ) : (
             <View style={styles.noDataContainer}>
@@ -774,11 +801,33 @@ const styles = StyleSheet.create({
   demoBadge: {
     backgroundColor: "rgba(255,107,53,0.3)",
   },
+  manualBadge: {
+    backgroundColor: "rgba(107,155,255,0.3)",
+  },
   badgeText: {
     color: "rgba(255,255,255,0.7)",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1,
+  },
+  locationBadgeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 6,
+  },
+  locationBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  locationBadgeText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 9,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+  backgroundBadge: {
+    backgroundColor: "rgba(100,200,100,0.3)",
   },
   predictionLabel: {
     fontSize: 16,

@@ -14,7 +14,11 @@ import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../../convex/_generated/api";
 import { usePushToken } from "../../hooks/usePushToken";
+import { useLocation, ManualLocationData } from "../../hooks/useLocation";
 import { BACKGROUND_LOCATION_TASK } from "../../tasks/backgroundLocation";
+import { LocationSearch } from "../../components/LocationSearch";
+
+const MANUAL_LOCATION_KEY = "manualLocation";
 
 const DEV_TAP_COUNT = 7;
 const DEV_TAP_TIMEOUT = 3000; // 3 seconds to complete taps
@@ -49,11 +53,13 @@ interface DebugResult {
 
 export default function SettingsScreen() {
   const { pushToken } = usePushToken();
+  const { isManualMode, manualPlaceName, refreshLocation } = useLocation();
   const device = useQuery(
     api.devices.getByToken,
     pushToken ? { pushToken } : "skip"
   );
   const updatePreferences = useMutation(api.devices.updatePreferences);
+  const updateLocationMode = useMutation(api.devices.updateLocationMode);
   const sendTestNotification = useAction(api.sunsets.sendTestNotification);
   const debugSunsetCheck = useAction(api.sunsets.debugSunsetCheck);
 
@@ -67,15 +73,22 @@ export default function SettingsScreen() {
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugResult, setDebugResult] = useState<DebugResult | null>(null);
   const [devModeUnlocked, setDevModeUnlocked] = useState(false);
+  const [manualLocationEnabled, setManualLocationEnabled] = useState(false);
+  const [showLocationSearch, setShowLocationSearch] = useState(false);
+  const [savedBackgroundTracking, setSavedBackgroundTracking] = useState<boolean | null>(null);
 
   const tapCountRef = useRef(0);
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    setManualLocationEnabled(isManualMode);
+  }, [isManualMode]);
+
+  useEffect(() => {
     if (device) {
       setNotifyMorning(device.notifyMorning);
       setNotifyHourBefore(device.notifyHourBefore);
-      setNotifyTenMinBefore(device.notifyTenMinBefore ?? false);
+      setNotifyTenMinBefore(device.notifyTenMinBefore ?? true);
       setMinQuality(device.minQuality);
     }
   }, [device]);
@@ -90,13 +103,11 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
-    // Check if background tracking is currently enabled
+    // Check if background tracking is enabled (based on user preference)
     const checkBackgroundStatus = async () => {
       try {
-        const hasStarted = await Location.hasStartedLocationUpdatesAsync(
-          BACKGROUND_LOCATION_TASK
-        );
-        setBackgroundTracking(hasStarted);
+        const bgEnabled = await AsyncStorage.getItem("backgroundTrackingEnabled");
+        setBackgroundTracking(bgEnabled === "true");
       } catch {
         setBackgroundTracking(false);
       }
@@ -151,25 +162,26 @@ export default function SettingsScreen() {
   };
 
   const handleToggleBackgroundTracking = async (value: boolean) => {
+    // Update state and preference immediately
+    setBackgroundTracking(value);
+    await AsyncStorage.setItem("backgroundTrackingEnabled", value ? "true" : "false");
+
     try {
       if (value) {
         const { status } = await Location.requestBackgroundPermissionsAsync();
-        if (status !== "granted") {
-          return;
+        if (status === "granted") {
+          await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 8000, // ~5 miles
+            timeInterval: 60 * 60 * 1000, // 1 hour
+            pausesUpdatesAutomatically: true,
+            showsBackgroundLocationIndicator: true,
+            foregroundService: {
+              notificationTitle: "GTFO is tracking location",
+              notificationBody: "Keeping sunset predictions accurate while you travel.",
+            },
+          });
         }
-        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-          accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 8000, // ~5 miles
-          timeInterval: 60 * 60 * 1000, // 1 hour
-          pausesUpdatesAutomatically: true,
-          showsBackgroundLocationIndicator: true,
-          foregroundService: {
-            notificationTitle: "GTFO is tracking location",
-            notificationBody: "Keeping sunset predictions accurate while you travel.",
-          },
-        });
-        setBackgroundTracking(true);
-        await AsyncStorage.setItem("backgroundTrackingEnabled", "true");
       } else {
         const hasStarted = await Location.hasStartedLocationUpdatesAsync(
           BACKGROUND_LOCATION_TASK
@@ -177,12 +189,83 @@ export default function SettingsScreen() {
         if (hasStarted) {
           await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
         }
-        setBackgroundTracking(false);
-        await AsyncStorage.setItem("backgroundTrackingEnabled", "false");
       }
     } catch (error) {
       console.log("Failed to toggle background tracking:", error);
     }
+  };
+
+  const handleToggleManualLocation = async (value: boolean) => {
+    if (value) {
+      // Save current background tracking state before disabling
+      setSavedBackgroundTracking(backgroundTracking);
+      // Show search modal to select location
+      setShowLocationSearch(true);
+    } else {
+      // Switching back to auto mode
+      setManualLocationEnabled(false);
+      await AsyncStorage.removeItem(MANUAL_LOCATION_KEY);
+
+      if (pushToken) {
+        try {
+          await updateLocationMode({
+            pushToken,
+            locationMode: "auto",
+          });
+        } catch (e) {
+          console.log("Failed to update location mode:", e);
+        }
+      }
+
+      // Restore background tracking state if it was enabled before
+      const wasEnabled = await AsyncStorage.getItem("backgroundTrackingWasEnabled");
+      if (wasEnabled === "true") {
+        await handleToggleBackgroundTracking(true);
+        await AsyncStorage.removeItem("backgroundTrackingWasEnabled");
+      }
+
+      refreshLocation();
+    }
+  };
+
+  const handleLocationSelect = async (result: { latitude: number; longitude: number; placeName: string }) => {
+    setShowLocationSearch(false);
+    setManualLocationEnabled(true);
+
+    // Save to AsyncStorage
+    const manualData: ManualLocationData = {
+      latitude: result.latitude,
+      longitude: result.longitude,
+      placeName: result.placeName,
+    };
+    await AsyncStorage.setItem(MANUAL_LOCATION_KEY, JSON.stringify(manualData));
+
+    // Update backend
+    if (pushToken) {
+      try {
+        await updateLocationMode({
+          pushToken,
+          locationMode: "manual",
+          manualLatitude: result.latitude,
+          manualLongitude: result.longitude,
+          manualPlaceName: result.placeName,
+        });
+      } catch (e) {
+        console.log("Failed to update location mode:", e);
+      }
+    }
+
+    // Disable background tracking when in manual mode
+    if (backgroundTracking) {
+      await AsyncStorage.setItem("backgroundTrackingWasEnabled", "true");
+      await handleToggleBackgroundTracking(false);
+    }
+
+    refreshLocation();
+  };
+
+  const handleLocationSearchClose = () => {
+    setShowLocationSearch(false);
   };
 
   const handleTestNotification = async () => {
@@ -320,18 +403,48 @@ export default function SettingsScreen() {
 
           <View style={styles.row}>
             <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Background Tracking</Text>
+              <Text style={styles.rowTitle}>Manual Location</Text>
               <Text style={styles.rowSubtitle}>
-                Update predictions while traveling
+                Override GPS with a custom location
               </Text>
             </View>
             <Switch
-              value={backgroundTracking}
-              onValueChange={handleToggleBackgroundTracking}
+              value={manualLocationEnabled}
+              onValueChange={handleToggleManualLocation}
               trackColor={{ false: "#333", true: "#ff6b35" }}
               thumbColor="#fff"
             />
           </View>
+
+          {manualLocationEnabled && manualPlaceName && (
+            <View style={styles.manualLocationInfo}>
+              <Text style={styles.manualLocationLabel}>Current location:</Text>
+              <Text style={styles.manualLocationName}>{manualPlaceName}</Text>
+              <TouchableOpacity
+                style={styles.changeLocationButton}
+                onPress={() => setShowLocationSearch(true)}
+              >
+                <Text style={styles.changeLocationText}>Change Location</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {!manualLocationEnabled && (
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle}>Background Tracking</Text>
+                <Text style={styles.rowSubtitle}>
+                  Update predictions while traveling
+                </Text>
+              </View>
+              <Switch
+                value={backgroundTracking}
+                onValueChange={handleToggleBackgroundTracking}
+                trackColor={{ false: "#333", true: "#ff6b35" }}
+                thumbColor="#fff"
+              />
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -344,7 +457,7 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
-        {(__DEV__ || devModeUnlocked) && (
+        {devModeUnlocked && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Debug</Text>
             <Text style={styles.sectionSubtitle}>
@@ -423,6 +536,11 @@ export default function SettingsScreen() {
           </Text>
         )}
       </ScrollView>
+      <LocationSearch
+        visible={showLocationSearch}
+        onClose={handleLocationSearchClose}
+        onSelect={handleLocationSelect}
+      />
     </SafeAreaView>
   );
 }
@@ -598,5 +716,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#888",
     marginTop: 4,
+  },
+  manualLocationInfo: {
+    backgroundColor: "#16213e",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  manualLocationLabel: {
+    fontSize: 12,
+    color: "#888",
+    marginBottom: 4,
+  },
+  manualLocationName: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#fff",
+    marginBottom: 12,
+  },
+  changeLocationButton: {
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "#ff6b35",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  changeLocationText: {
+    color: "#ff6b35",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
