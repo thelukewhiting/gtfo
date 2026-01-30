@@ -142,11 +142,14 @@ export function useLocation() {
           );
           if (!hasStarted) {
             await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-              accuracy: Location.Accuracy.Balanced,
+              accuracy: Location.Accuracy.Low,
               distanceInterval: 8000, // ~5 miles - sunset quality doesn't vary much within this
               timeInterval: 60 * 60 * 1000, // 1 hour max
               pausesUpdatesAutomatically: true,
-              showsBackgroundLocationIndicator: true,
+              showsBackgroundLocationIndicator: false,
+              // Defer updates to batch them and reduce wake-ups (approximates significant location changes)
+              deferredUpdatesDistance: 500, // meters before batched update
+              deferredUpdatesInterval: 15 * 60 * 1000, // 15 min minimum between batches
               foregroundService: {
                 notificationTitle: "GTFO is tracking location",
                 notificationBody: "Keeping sunset predictions accurate while you travel.",
